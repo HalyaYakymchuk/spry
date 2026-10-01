@@ -73,6 +73,29 @@ async def current_user(
 ) -> User:
     """Validate Cognito ID token and return or create the matching User."""
     if not settings.auth_configured:
+        if (
+            settings.is_development
+            and credentials
+            and credentials.scheme.lower() == "bearer"
+            and credentials.credentials == "mock-dev-token"
+        ):
+            sub = "mock-dev-user"
+            email = "user@example.com"
+            name = "User"
+            stmt = select(User).where(User.cognito_sub == sub)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user is None:
+                user = User(
+                    cognito_sub=sub,
+                    email=email,
+                    name=name,
+                )
+                session.add(user)
+                await session.flush()
+                await session.refresh(user)
+            return user
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication is not configured",

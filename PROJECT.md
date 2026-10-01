@@ -2,7 +2,7 @@
 
 ## 1. Repository Structure & Purpose
 - `backend/`: FastAPI application, SQLAlchemy ORM, Alembic migrations. Handles data persistence and exposes the REST API.
-- `frontend/`: React SPA built with Vite, styled with Tailwind CSS. Single-page view for meeting analytics and creation.
+- `frontend/`: Next.js App Router with TypeScript and Tailwind CSS. Single-page view for meeting analytics and creation.
 - `docker-compose.yml`: Defines the local environment orchestrating Postgres, Backend, and Frontend.
 
 ## 2. API Contract
@@ -25,8 +25,9 @@ Meeting Object (JSON):
 - Base OS/Runtime: `python:3.12-slim`, `node:20-alpine`
 - Database: `postgres:16-alpine`
 - Backend: fastapi==0.110.0, uvicorn==0.28.0, sqlalchemy==2.0.28, alembic==1.13.1, pydantic==2.6.4, psycopg2-binary==2.9.9
+- Frontend: next==14.2.0, react==18.3.1, tailwindcss==3.4.1
 
 ## 4. Startup Order
 1. `postgres` starts on 5432. Healthcheck uses `pg_isready`.
 2. `backend` waits for `postgres` via `condition: service_healthy`, runs `alembic upgrade head`, starts on port 8000.
-3. `frontend` starts on port 5173 and communicates with the backend.
+3. `frontend` starts on port 3000 and communicates with the backend via internal Docker network (`http://backend:8000`).

@@ -229,7 +229,7 @@ export default function MeetingsPage() {
       if (!matchesSearch) return false;
 
       // Status
-      const start = new Date(meeting.starts_at).getTime();
+      
       const end = new Date(meeting.ends_at).getTime();
 
       if (statusFilter === "upcoming") return end >= now;

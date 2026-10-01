@@ -1,5 +1,5 @@
-import os
 from collections.abc import Generator
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -8,7 +8,6 @@ from app.config import get_settings
 
 class Base(DeclarativeBase):
     """Declarative base shared by every ORM model."""
-    pass
 
 
 def get_normalized_database_url() -> str:

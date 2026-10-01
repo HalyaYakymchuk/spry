@@ -1,47 +1,41 @@
-from collections.abc import AsyncIterator
-from typing import Annotated
-
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+import os
+from collections.abc import Generator
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
 
 
 class Base(DeclarativeBase):
     """Declarative base shared by every ORM model."""
+    pass
 
 
-def create_engine() -> AsyncEngine:
-    settings = get_settings()
-    if not settings.db_pooling:
-        return create_async_engine(settings.database_url, echo=False, poolclass=NullPool)
-    return create_async_engine(
-        settings.database_url,
-        echo=False,
-        pool_pre_ping=True,
-    )
+def get_normalized_database_url() -> str:
+    url = get_settings().database_url
+    if url.startswith("postgresql+asyncpg://"):
+        url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    elif url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return url
 
 
-engine: AsyncEngine = create_engine()
-SessionFactory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+def create_db_engine():
+    url = get_normalized_database_url()
+    # If SQLite is used for tests, don't pass pool_pre_ping or connect_args
+    if url.startswith("sqlite"):
+        return create_engine(url, connect_args={"check_same_thread": False})
+    return create_engine(url, pool_pre_ping=True)
 
 
-async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency yielding a session that commits on success, rolls back on error."""
-    async with SessionFactory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+engine = create_db_engine()
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+def get_db() -> Generator[Session, None, None]:
+    """FastAPI dependency yielding a synchronous SQLAlchemy session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

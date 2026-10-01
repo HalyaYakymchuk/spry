@@ -1,59 +1,20 @@
+import os
 from functools import lru_cache
-from typing import Annotated, Literal
-
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic import BaseModel
 
 
-class Settings(BaseSettings):
-    """Application configuration, sourced entirely from the environment."""
-
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    app_name: str = "Peach API"
-    app_env: Literal["development", "test", "production"] = "development"
-    log_level: str = "info"
-
-    database_url: str = "postgresql+asyncpg://peach:peach@db:5432/peach"
-    # Off on Lambda: a warm but idle execution environment would otherwise hold
-    # pooled connections open, and Aurora Serverless only pauses at zero.
-    db_pooling: bool = True
-    # NoDecode keeps pydantic-settings from JSON-parsing the env value, so the
-    # validator below can accept the comma-separated form Compose passes.
-    cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000"]
+class Settings(BaseModel):
+    app_name: str = "Spry API"
+    app_env: str = os.getenv("APP_ENV", "development")
+    log_level: str = os.getenv("LOG_LEVEL", "info")
+    database_url: str = os.getenv(
+        "DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/spry"
     )
-
-    # Cognito. With no user pool configured every protected endpoint answers
-    # 503, so a missing setting can never leave the API open.
-    cognito_region: str = "us-east-1"
-    cognito_user_pool_id: str = ""
-    cognito_client_id: str = ""
-    # The pool's public keys as JSON. Set on Lambda, which has no route to fetch
-    # them; left empty elsewhere, and they are downloaded from the issuer.
-    cognito_jwks: str = ""
-
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _split_origins(cls, value: object) -> object:
-        """Accept a comma-separated string, since that is how Compose passes it."""
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
-
-    @property
-    def cognito_issuer(self) -> str:
-        return (
-            f"https://cognito-idp.{self.cognito_region}.amazonaws.com/{self.cognito_user_pool_id}"
-        )
-
-    @property
-    def auth_configured(self) -> bool:
-        return bool(self.cognito_user_pool_id and self.cognito_client_id)
-
-    @property
-    def is_development(self) -> bool:
-        return self.app_env == "development"
+    cors_origins: list[str] = [
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,*").split(",")
+        if origin.strip()
+    ]
 
 
 @lru_cache

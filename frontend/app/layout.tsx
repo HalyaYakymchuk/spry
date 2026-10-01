@@ -1,40 +1,20 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Inter } from "next/font/google";
-
-import { Providers } from "@/components/providers";
-import { Toaster } from "@/components/ui/sonner";
-
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-notion-sans",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "Peach",
-  description: "FastAPI + Next.js + Postgres starter",
+  title: "Spry - Meeting Scheduler & Analytics",
+  description: "View and schedule meetings with ease",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      {/* Extensions such as Grammarly stamp attributes on <body> before React
-          hydrates; this silences that one-level mismatch only. */}
-      <body className="flex min-h-full flex-col" suppressHydrationWarning>
-        <Providers>
-          {children}
-          <Toaster />
-        </Providers>
+    <html lang="en">
+      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
+        {children}
       </body>
     </html>
   );

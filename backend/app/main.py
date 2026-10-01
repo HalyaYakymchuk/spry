@@ -24,8 +24,7 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health", tags=["health"], summary="Liveness probe")
-    async def health() -> dict[str, str]:
-        """Liveness only - deliberately touches no dependencies."""
+    def root_health() -> dict[str, str]:
         return {"status": "ok"}
 
     app.include_router(api_router)

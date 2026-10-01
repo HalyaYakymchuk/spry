@@ -1,4 +1,3 @@
-from app.schemas.item import ItemCreate, ItemList, ItemRead, ItemUpdate
-from app.schemas.user import UserRead
+from app.schemas.meeting import MeetingBase, MeetingCreate, MeetingResponse
 
-__all__ = ["ItemCreate", "ItemList", "ItemRead", "ItemUpdate", "UserRead"]
+__all__ = ["MeetingBase", "MeetingCreate", "MeetingResponse"]

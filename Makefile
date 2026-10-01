@@ -49,7 +49,7 @@ shell-backend: ## Shell into the backend container
 	$(COMPOSE) exec backend bash
 
 shell-db: ## psql into the database
-	$(COMPOSE) exec db psql -U $${POSTGRES_USER:-peach} -d $${POSTGRES_DB:-peach}
+	$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-spry}
 
 deploy-cognito: ## Create/update the Cognito user pool; writes COGNITO_* to .env and prints them
 	./scripts/deploy-cognito.sh

@@ -1,79 +1,31 @@
 # syntax=docker/dockerfile:1
 
-# --- builder: resolve dependencies into a self-contained virtualenv ---
-FROM python:3.14-slim AS builder
-
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/app/.venv
-
-WORKDIR /app
-
-COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
-
-# --- dev: same base plus dev dependencies, used by docker-compose.override.yml ---
-FROM builder AS dev
+FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project
+WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+COPY requirements.txt ./
+RUN python -m venv /app/.venv \
+    && . /app/.venv/bin/activate \
+    && pip install --no-cache-dir -r requirements.txt
+
 COPY . .
+RUN chmod +x ./scripts/entrypoint.sh
+
+# --- dev target ---
+FROM base AS dev
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-
-
-# --- runtime ---
-FROM python:3.14-slim AS runtime
-
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/app/.venv/bin:$PATH"
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 1000 app
-
-WORKDIR /app
-
-COPY --from=builder --chown=app:app /app/.venv /app/.venv
-COPY --chown=app:app . .
-
-USER app
-EXPOSE 8000
-
 CMD ["./scripts/entrypoint.sh"]
 
-
-# --- lambda: what scripts/deploy-backend.sh ships to AWS Lambda ---
-# AWS's base image carries the runtime interface client. The virtualenv from
-# the builder cannot be reused here - it points at /usr/local/bin/python - so
-# the locked dependencies are installed straight into the task root instead.
-FROM public.ecr.aws/lambda/python:3.14 AS lambda
-
-RUN --mount=from=ghcr.io/astral-sh/uv:latest,source=/uv,target=/bin/uv \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/requirements.txt \
-    && uv pip install --no-cache --compile-bytecode \
-        --target "${LAMBDA_TASK_ROOT}" -r /tmp/requirements.txt \
-    && rm /tmp/requirements.txt
-
-COPY app ${LAMBDA_TASK_ROOT}/app
-COPY migrations ${LAMBDA_TASK_ROOT}/migrations
-COPY alembic.ini ${LAMBDA_TASK_ROOT}/
-
-CMD ["app.lambda_handler.handler"]
+# --- runtime target ---
+FROM base AS runtime
+EXPOSE 8000
+CMD ["./scripts/entrypoint.sh"]

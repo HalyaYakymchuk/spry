@@ -34,7 +34,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aws-region: eu-north-1
           role-session-name: gha-deploy-backend-${{ github.run_id }}
 
       # The function runs on arm64 and this runner is x86, so the image is
@@ -46,11 +46,11 @@ jobs:
       - name: Deploy
         run: make deploy-backend
         env:
-          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
           # There is no .env here. Everything else falls back to the script's
           # defaults, and any parameter left empty keeps whatever the stack
           # already has - so a deploy from CI will not undo CORS settings.
-          PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+          PROJECT_NAME: ${{ vars.PROJECT_NAME || 'peach' }}
 
       - name: Summary
         if: always()
@@ -69,5 +69,5 @@ jobs:
             echo "| result | ${{ job.status }} |"
           } >> "$GITHUB_STEP_SUMMARY"
         env:
-          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-          PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+          PROJECT_NAME: ${{ vars.PROJECT_NAME || 'peach' }}

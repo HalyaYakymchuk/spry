@@ -48,7 +48,7 @@ Parameters:
     MaxValue: 10240
     Description: MB. CPU is allocated in proportion, so this also sets the speed.
 
-  TimeoutSeconds:
+  Seconds:
     Type: Number
     Default: 30
     MinValue: 3
@@ -83,7 +83,7 @@ Parameters:
     Type: Number
     Default: 0
     MinValue: 0
-    Description: ACUs. 0 lets the cluster pause when nothing is connected.
+    Description: ACUTimeouts. 0 lets the cluster pause when nothing is connected.
 
   DbMaxCapacity:
     Type: Number
@@ -137,10 +137,19 @@ Parameters:
       The pool's public signing keys, as JSON. The function has no internet
       route to fetch them, so the deploy script downloads and passes them in.
 
+  CognitoRegion:
+    Type: String
+    Default: ""
+    Description: >-
+      Region of the Cognito user pool. Defaults to the stack's region if empty.
+
   LogRetentionDays:
     Type: Number
     Default: 7
     Description: CloudWatch gives 5 GB of ingestion and storage free each month.
+
+Conditions:
+  HasCognitoRegion: !Not [!Equals [!Ref CognitoRegion, ""]]
 
 Resources:
   # --- networking ---------------------------------------------------------
@@ -187,43 +196,24 @@ Resources:
   # A starter database: one serverless instance, never reachable from the
   # internet, and torn down with the stack. Turn on DeletionProtection before
   # this holds anything you would miss.
-  DbCluster:
-    Type: AWS::RDS::DBCluster
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      DBClusterIdentifier: !Sub "${ProjectName}-db"
-      Engine: aurora-postgresql
-      EngineVersion: !Ref DbEngineVersion
-      DatabaseName: !Ref DbName
-      MasterUsername: !Ref DbUsername
-      MasterUserPassword: !Ref DbPassword
-      DBSubnetGroupName: !Ref DbSubnetGroup
-      VpcSecurityGroupIds: [!Ref DbSecurityGroup]
-      StorageEncrypted: true
-      BackupRetentionPeriod: !Ref DbBackupRetentionDays
-      CopyTagsToSnapshot: true
-      DeletionProtection: false
-      ServerlessV2ScalingConfiguration:
-        MinCapacity: !Ref DbMinCapacity
-        MaxCapacity: !Ref DbMaxCapacity
-        SecondsUntilAutoPause: !Ref DbSecondsUntilAutoPause
-      Tags:
-        - Key: PROJECT_NAME
-          Value: !Ref ProjectName
-
   DbInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      DBInstanceIdentifier: !Sub "${ProjectName}-db-1"
-      DBClusterIdentifier: !Ref DbCluster
-      DBInstanceClass: db.serverless
-      Engine: aurora-postgresql
+      DBInstanceIdentifier: !Sub "${ProjectName}-db"
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: '20'
+      Engine: postgres
+      EngineVersion: '16'
+      DBName: !Ref DbName
+      MasterUsername: !Ref DbUsername
+      MasterUserPassword: !Ref DbPassword
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      StorageEncrypted: true
       PubliclyAccessible: false
-      AutoMinorVersionUpgrade: true
-      EnablePerformanceInsights: false
+      DeletionProtection: false
       Tags:
         - Key: PROJECT_NAME
           Value: !Ref ProjectName
@@ -239,8 +229,8 @@ Resources:
       Description: !Sub "SQLAlchemy async connection string for ${ProjectName}"
       SecretString: !Sub
         - "postgresql+asyncpg://${DbUsername}:${DbPassword}@${Endpoint}:${Port}/${DbName}"
-        - Endpoint: !GetAtt DbCluster.Endpoint.Address
-          Port: !GetAtt DbCluster.Endpoint.Port
+        - Endpoint: !GetAtt DbInstance.Endpoint.Address
+          Port: !GetAtt DbInstance.Endpoint.Port
       Tags:
         - Key: PROJECT_NAME
           Value: !Ref ProjectName
@@ -286,7 +276,7 @@ Resources:
         ImageUri: !Ref ImageUri
       Architectures: [!Ref Architecture]
       MemorySize: !Ref MemorySize
-      Timeout: !Ref TimeoutSeconds
+      Timeout: 120
       Role: !GetAtt ExecutionRole.Arn
       LoggingConfig:
         LogGroup: !Ref LogGroup
@@ -298,7 +288,7 @@ Resources:
           APP_ENV: !Ref AppEnv
           LOG_LEVEL: !Ref LogLevel
           CORS_ORIGINS: !Ref CorsOrigins
-          COGNITO_REGION: !Ref AWS::Region
+          COGNITO_REGION: !If [HasCognitoRegion, !Ref CognitoRegion, !Ref AWS::Region]
           COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
           COGNITO_CLIENT_ID: !Ref CognitoClientId
           COGNITO_JWKS: !Ref CognitoJwks
@@ -307,8 +297,8 @@ Resources:
           DB_POOLING: "false"
           DATABASE_URL: !Sub
             - "postgresql+asyncpg://${DbUsername}:${DbPassword}@${Endpoint}:${Port}/${DbName}"
-            - Endpoint: !GetAtt DbCluster.Endpoint.Address
-              Port: !GetAtt DbCluster.Endpoint.Port
+            - Endpoint: !GetAtt DbInstance.Endpoint.Address
+              Port: !GetAtt DbInstance.Endpoint.Port
       Tags:
         - Key: PROJECT_NAME
           Value: !Ref ProjectName
@@ -350,7 +340,7 @@ Outputs:
     Value: !Ref Function
 
   DatabaseEndpoint:
-    Value: !GetAtt DbCluster.Endpoint.Address
+    Value: !GetAtt DbInstance.Endpoint.Address
 
   DatabaseUrlSecretArn:
     Value: !Ref DatabaseUrlSecret

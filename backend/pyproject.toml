@@ -10,6 +10,8 @@ dependencies = [
     "alembic==1.13.1",
     "pydantic==2.6.4",
     "psycopg2-binary==2.9.9",
+    "mangum",
+    "awslambdaric",
 ]
 
 [dependency-groups]
@@ -21,3 +23,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["B008", "E501"]

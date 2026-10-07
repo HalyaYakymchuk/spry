@@ -13,6 +13,7 @@ import {
   CalendarCheck,
   TrendingUp,
 } from "lucide-react";
+import { getApiUrl } from "@/lib/api";
 
 interface Meeting {
   id: number;
@@ -45,7 +46,7 @@ export default function MeetingsPage() {
     if (isManualRefresh) setRefreshing(true);
     setError(null);
     try {
-      const res = await fetch("/api/meetings");
+      const res = await fetch(getApiUrl("/api/meetings"));
       if (!res.ok) {
         throw new Error(`Failed to fetch meetings: ${res.status} ${res.statusText}`);
       }
@@ -115,7 +116,7 @@ export default function MeetingsPage() {
         attendee_count: Number(attendeeCount),
       };
 
-      const res = await fetch("/api/meetings", {
+      const res = await fetch(getApiUrl("/api/meetings"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

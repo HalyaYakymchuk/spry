@@ -165,7 +165,7 @@ docker buildx build \
   --sbom=false \
   --tag "${IMAGE_URI}" \
   --push \
-  "${ROOT}/backend"
+  ./backend
 
 # --- database password ------------------------------------------------------
 
@@ -212,9 +212,9 @@ fi
 
 # Parameters go through a 0600 file rather than argv, so the password never
 # shows up in `ps`.
-PARAMS_FILE="$(mktemp)"
+PARAMS_FILE="$(cygpath -w $(mktemp))"
 chmod 600 "${PARAMS_FILE}"
-RESULT_FILE="$(mktemp)"
+RESULT_FILE="$(cygpath -w $(mktemp))"
 trap 'rm -f "${PARAMS_FILE}" "${RESULT_FILE}"' EXIT
 
 PROJECT_NAME="${PROJECT_NAME}" \
@@ -234,6 +234,7 @@ DB_SECONDS_UNTIL_AUTO_PAUSE="${DB_SECONDS_UNTIL_AUTO_PAUSE:-}" \
 APP_ENV="${APP_ENV_AWS:-production}" \
 LOG_LEVEL="${LOG_LEVEL:-info}" \
 CORS_ORIGINS="${API_CORS_ORIGINS:-}" \
+COGNITO_REGION="${COGNITO_REGION:-${AWS_REGION}}" \
 COGNITO_USER_POOL_ID="${COGNITO_USER_POOL_ID:-}" \
 COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID:-}" \
 COGNITO_JWKS="${COGNITO_JWKS}" \
@@ -258,6 +259,7 @@ params = {
     "AppEnv": os.environ["APP_ENV"],
     "LogLevel": os.environ["LOG_LEVEL"],
     "CorsOrigins": os.environ["CORS_ORIGINS"],
+    "CognitoRegion": os.environ["COGNITO_REGION"],
     "CognitoUserPoolId": os.environ["COGNITO_USER_POOL_ID"],
     "CognitoClientId": os.environ["COGNITO_CLIENT_ID"],
     "CognitoJwks": os.environ["COGNITO_JWKS"],
@@ -286,7 +288,7 @@ fi
 
 if ! aws cloudformation deploy \
   --stack-name "${STACK_NAME}" \
-  --template-file "${TEMPLATE}" \
+  --template-file ./infra/backend.yaml \
   --parameter-overrides "file://${PARAMS_FILE}" \
   --capabilities CAPABILITY_IAM \
   --no-fail-on-empty-changeset \

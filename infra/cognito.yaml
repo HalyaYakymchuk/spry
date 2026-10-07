@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Cognito User Pool, App Client, and Hosted UI Domain for Spry / Peach.
+  Supports email-based authentication (FR-1) with PKCE authorization code flow,
+  and optional Google identity provider integration.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: peach
+    Description: Prefix for every resource name and the PROJECT_NAME tag.
+
+  CallbackUrls:
+    Type: CommaDelimitedList
+    Default: "http://localhost:3000"
+    Description: Comma-separated allowed OAuth callback URLs for the app client.
+
+  LogoutUrls:
+    Type: CommaDelimitedList
+    Default: "http://localhost:3000"
+    Description: Comma-separated allowed logout URLs for the app client.
+
+  DomainPrefix:
+    Type: String
+    Default: ""
+    Description: >-
+      Unique prefix for the Cognito hosted UI domain. If left blank,
+      defaults to ${ProjectName}-${AWS::AccountId}.
+
+  GoogleClientId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Google OAuth client ID. Leave blank to disable Google sign-in.
+
+  GoogleClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Google OAuth client secret.
+
+Conditions:
+  HasDomainPrefix: !Not [!Equals [!Ref DomainPrefix, ""]]
+  HasGoogleAuth: !And
+    - !Not [!Equals [!Ref GoogleClientId, ""]]
+    - !Not [!Equals [!Ref GoogleClientSecret, ""]]
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      UserPoolName: !Sub "${ProjectName}-users"
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 7
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: name
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+      UserPoolTags:
+        PROJECT_NAME: !Ref ProjectName
+
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasGoogleAuth
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Ref GoogleClientSecret
+        authorize_scopes: "openid email profile"
+      AttributeMapping:
+        email: email
+        name: name
+        username: sub
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub "${ProjectName}-app-client"
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs: !Ref CallbackUrls
+      LogoutURLs: !Ref LogoutUrls
+      SupportedIdentityProviders:
+        !If
+          - HasGoogleAuth
+          - - COGNITO
+            - Google
+          - - COGNITO
+      PreventUserExistenceErrors: ENABLED
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !If
+        - HasDomainPrefix
+        - !Ref DomainPrefix
+        - !Sub "${ProjectName}-${AWS::AccountId}"
+
+Outputs:
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+
+  UserPoolArn:
+    Description: Cognito User Pool ARN
+    Value: !GetAtt UserPool.Arn
+
+  ClientId:
+    Description: Cognito App Client ID (no secret)
+    Value: !Ref UserPoolClient
+
+  CognitoDomain:
+    Description: Cognito Hosted UI Domain
+    Value: !Sub "${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
+
+  DomainPrefix:
+    Description: Cognito Hosted UI Domain Prefix
+    Value: !Ref UserPoolDomain
+
+  GoogleEnabled:
+    Description: Whether Google authentication is enabled
+    Value: !If [HasGoogleAuth, "true", "false"]

@@ -17,6 +17,22 @@ class Settings(BaseModel):
         if origin.strip()
     ]
 
+    cognito_region: str = os.getenv("COGNITO_REGION", "eu-north-1")
+    cognito_user_pool_id: str = os.getenv("COGNITO_USER_POOL_ID", "")
+    cognito_client_id: str = os.getenv("COGNITO_CLIENT_ID", "")
+    cognito_jwks: str = os.getenv("COGNITO_JWKS", "")
+
+    @property
+    def cognito_issuer(self) -> str:
+        return (
+            os.getenv("COGNITO_ISSUER")
+            or f"https://cognito-idp.{self.cognito_region}.amazonaws.com/{self.cognito_user_pool_id}"
+        )
+
+    @property
+    def auth_configured(self) -> bool:
+        return bool(self.cognito_user_pool_id and self.cognito_client_id)
+
 
 @lru_cache
 def get_settings() -> Settings:

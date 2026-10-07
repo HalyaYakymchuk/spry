@@ -23,6 +23,7 @@ Meeting Object (JSON):
 
 ## 3. Technology & Version Pinning
 - Base OS/Runtime: `python:3.12-slim`, `node:20-alpine`
+
 - Database: `postgres:16-alpine`
 - Backend: fastapi==0.110.0, uvicorn==0.28.0, sqlalchemy==2.0.28, alembic==1.13.1, pydantic==2.6.4, psycopg2-binary==2.9.9
 - Frontend: next==14.2.0, react==18.3.1, tailwindcss==3.4.1

@@ -26,6 +26,6 @@ EXPOSE 8000
 CMD ["./scripts/entrypoint.sh"]
 
 # --- runtime target ---
-FROM base AS runtime
-EXPOSE 8000
-CMD ["./scripts/entrypoint.sh"]
+FROM base AS lambda
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "awslambdaric"]
+CMD ["app.lambda_handler.handler"]

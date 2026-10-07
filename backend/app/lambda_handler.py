@@ -31,9 +31,7 @@ def _migrate() -> dict[str, str]:
     from alembic.config import Config
 
     config = Config(str(ALEMBIC_INI))
-    config.set_main_option(
-        "script_location", str(ALEMBIC_INI.parent / "migrations")
-    )
+    config.set_main_option("script_location", str(ALEMBIC_INI.parent / "migrations"))
     command.upgrade(config, "head")
     logger.info("migrations applied")
     return {"status": "migrated"}

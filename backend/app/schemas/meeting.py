@@ -4,7 +4,9 @@ from pydantic import BaseModel, Field, field_serializer, field_validator
 
 
 class MeetingBase(BaseModel):
-    title: str = Field(..., min_length=1, max_length=255, description="Title of the meeting")
+    title: str = Field(
+        ..., min_length=1, max_length=255, description="Title of the meeting"
+    )
     starts_at: datetime = Field(..., description="Start timestamp in ISO 8601 format")
     ends_at: datetime = Field(..., description="End timestamp in ISO 8601 format")
     attendee_count: int = Field(..., ge=1, description="Attendee count, must be >= 1")

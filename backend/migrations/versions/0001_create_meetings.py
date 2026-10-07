@@ -1,10 +1,11 @@
 """create meetings table
 
 Revision ID: 0001_create_meetings
-Revises: 
+Revises:
 Create Date: 2026-10-01 18:00:00.000000
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -28,7 +29,9 @@ def upgrade() -> None:
         sa.CheckConstraint("length(title) >= 1", name="ck_meetings_title_length"),
         sa.PrimaryKeyConstraint("id", name="pk_meetings"),
     )
-    op.create_index(op.f("ix_meetings_starts_at"), "meetings", ["starts_at"], unique=False)
+    op.create_index(
+        op.f("ix_meetings_starts_at"), "meetings", ["starts_at"], unique=False
+    )
 
 
 def downgrade() -> None:

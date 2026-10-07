@@ -17,6 +17,8 @@ class Meeting(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    starts_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     attendee_count: Mapped[int] = mapped_column(Integer, nullable=False)

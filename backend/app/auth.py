@@ -68,12 +68,16 @@ def _get_signing_key(token: str, settings: Settings):
 
 async def current_user(
     session: SessionDep,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)
+    ],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> User:
     """Validate Cognito ID token and return or create the matching User."""
     if not settings.auth_configured:
-        local_user = session.query(User).filter(User.cognito_sub == "local-mock-user").first()
+        local_user = (
+            session.query(User).filter(User.cognito_sub == "local-mock-user").first()
+        )
         if not local_user:
             local_user = User(
                 cognito_sub="local-mock-user",

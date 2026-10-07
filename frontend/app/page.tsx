@@ -43,8 +43,10 @@ export default function MeetingsPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "past">("all");
 
   const fetchMeetings = async (isManualRefresh = false) => {
-    if (isManualRefresh) setRefreshing(true);
-    setError(null);
+    if (isManualRefresh) {
+      setRefreshing(true);
+      setError(null);
+    }
     try {
       const res = await fetch(getApiUrl("/api/meetings"));
       if (!res.ok) {
@@ -52,9 +54,10 @@ export default function MeetingsPage() {
       }
       const data: Meeting[] = await res.json();
       setMeetings(data);
-    } catch (err: any) {
+      setError(null);
+    } catch (err: unknown) {
       console.error("Error fetching meetings:", err);
-      setError(err.message || "Failed to load meetings from backend");
+      setError(err instanceof Error ? err.message : "Failed to load meetings from backend");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -62,7 +65,34 @@ export default function MeetingsPage() {
   };
 
   useEffect(() => {
-    fetchMeetings();
+    let ignore = false;
+    async function load() {
+      try {
+        const res = await fetch(getApiUrl("/api/meetings"));
+        if (!res.ok) {
+          throw new Error(`Failed to fetch meetings: ${res.status} ${res.statusText}`);
+        }
+        const data: Meeting[] = await res.json();
+        if (!ignore) {
+          setMeetings(data);
+          setError(null);
+        }
+      } catch (err: unknown) {
+        console.error("Error fetching meetings:", err);
+        if (!ignore) {
+          setError(err instanceof Error ? err.message : "Failed to load meetings from backend");
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    }
+    load();
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   const handleCreateMeeting = async (e: React.FormEvent) => {
@@ -142,8 +172,8 @@ export default function MeetingsPage() {
       setAttendeeCount(1);
       setSuccessMessage(`"${createdMeeting.title}" has been successfully scheduled!`);
       setTimeout(() => setSuccessMessage(null), 5000);
-    } catch (err: any) {
-      setFormError(err.message || "Failed to schedule meeting.");
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : "Failed to schedule meeting.");
     } finally {
       setSubmitting(false);
     }

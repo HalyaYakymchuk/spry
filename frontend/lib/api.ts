@@ -40,22 +40,35 @@ export interface CreateMeetingPayload {
   attendee_count: number;
 }
 
-export async function fetchMeetings(): Promise<Meeting[]> {
+export async function fetchMeetings(token?: string): Promise<Meeting[]> {
   const url = getApiUrl("/api/meetings");
-  const res = await fetch(url);
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const res = await fetch(url, { headers });
   if (!res.ok) {
     throw new Error(`Failed to fetch meetings: ${res.status} ${res.statusText}`);
   }
   return res.json();
 }
 
-export async function createMeeting(payload: CreateMeetingPayload): Promise<Meeting> {
+export async function createMeeting(
+  payload: CreateMeetingPayload,
+  token?: string
+): Promise<Meeting> {
   const url = getApiUrl("/api/meetings");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 

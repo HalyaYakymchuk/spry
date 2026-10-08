@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import {
   Calendar,
   Clock,
@@ -13,7 +13,9 @@ import {
   CalendarCheck,
   TrendingUp,
 } from "lucide-react";
+import { useAuth } from "react-oidc-context";
 import { getApiUrl } from "@/lib/api";
+import { AuthHeader } from "@/components/AuthHeader";
 
 interface Meeting {
   id: number;
@@ -24,6 +26,9 @@ interface Meeting {
 }
 
 export default function MeetingsPage() {
+  const auth = useAuth();
+  const token = auth.user?.access_token || auth.user?.id_token;
+
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,58 +47,55 @@ export default function MeetingsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "upcoming" | "past">("all");
 
-  const fetchMeetings = async (isManualRefresh = false) => {
-    if (isManualRefresh) {
-      setRefreshing(true);
-      setError(null);
-    }
-    try {
-      const res = await fetch(getApiUrl("/api/meetings"));
-      if (!res.ok) {
-        throw new Error(`Failed to fetch meetings: ${res.status} ${res.statusText}`);
+  const fetchMeetings = useCallback(
+    async (isManualRefresh = false) => {
+      if (!token) {
+        if (isManualRefresh) {
+          setError("Please sign in to view and refresh meetings.");
+        }
+        setLoading(false);
+        setRefreshing(false);
+        return;
       }
-      const data: Meeting[] = await res.json();
-      setMeetings(data);
-      setError(null);
-    } catch (err: unknown) {
-      console.error("Error fetching meetings:", err);
-      setError(err instanceof Error ? err.message : "Failed to load meetings from backend");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
 
-  useEffect(() => {
-    let ignore = false;
-    async function load() {
+      if (isManualRefresh) {
+        setRefreshing(true);
+        setError(null);
+      }
       try {
-        const res = await fetch(getApiUrl("/api/meetings"));
+        const res = await fetch(getApiUrl("/api/meetings"), {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
         if (!res.ok) {
           throw new Error(`Failed to fetch meetings: ${res.status} ${res.statusText}`);
         }
         const data: Meeting[] = await res.json();
-        if (!ignore) {
-          setMeetings(data);
-          setError(null);
-        }
+        setMeetings(data);
+        setError(null);
       } catch (err: unknown) {
         console.error("Error fetching meetings:", err);
-        if (!ignore) {
-          setError(err instanceof Error ? err.message : "Failed to load meetings from backend");
-        }
+        setError(err instanceof Error ? err.message : "Failed to load meetings from backend");
       } finally {
-        if (!ignore) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        setLoading(false);
+        setRefreshing(false);
       }
+    },
+    [token]
+  );
+
+  useEffect(() => {
+    if (auth.isLoading) return;
+    if (token) {
+      fetchMeetings();
+    } else {
+      setLoading(false);
+      setMeetings([]);
     }
-    load();
-    return () => {
-      ignore = true;
-    };
-  }, []);
+  }, [auth.isLoading, token, fetchMeetings]);
 
   const handleCreateMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,6 +139,11 @@ export default function MeetingsPage() {
       return;
     }
 
+    if (!token) {
+      setFormError("Please sign in to schedule a meeting.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const payload = {
@@ -150,20 +157,24 @@ export default function MeetingsPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
         const errData = await res.json().catch(() => null);
-        const errorDetail = errData?.detail?.[0]?.msg || errData?.detail || `Error ${res.status}: Failed to create meeting`;
+        const errorDetail =
+          errData?.detail?.[0]?.msg || errData?.detail || `Error ${res.status}: Failed to create meeting`;
         throw new Error(errorDetail);
       }
 
       const createdMeeting: Meeting = await res.json();
-      setMeetings((prev) => [...prev, createdMeeting].sort(
-        (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()
-      ));
+      setMeetings((prev) =>
+        [...prev, createdMeeting].sort(
+          (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()
+        )
+      );
 
       // Reset form
       setTitle("");
@@ -247,7 +258,8 @@ export default function MeetingsPage() {
     const end = new Date(endIso).getTime();
 
     if (now < start) return { label: "Upcoming", color: "bg-blue-100 text-blue-800 border-blue-200" };
-    if (now >= start && now <= end) return { label: "In Progress", color: "bg-emerald-100 text-emerald-800 border-emerald-200" };
+    if (now >= start && now <= end)
+      return { label: "In Progress", color: "bg-emerald-100 text-emerald-800 border-emerald-200" };
     return { label: "Past", color: "bg-slate-100 text-slate-600 border-slate-200" };
   };
 
@@ -255,14 +267,10 @@ export default function MeetingsPage() {
   const filteredMeetings = useMemo(() => {
     const now = new Date().getTime();
     return meetings.filter((meeting) => {
-      // Search
       const matchesSearch = meeting.title.toLowerCase().includes(searchQuery.toLowerCase());
       if (!matchesSearch) return false;
 
-      // Status
-      
       const end = new Date(meeting.ends_at).getTime();
-
       if (statusFilter === "upcoming") return end >= now;
       if (statusFilter === "past") return end < now;
       return true;
@@ -285,6 +293,7 @@ export default function MeetingsPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <AuthHeader />
             <button
               onClick={() => fetchMeetings(true)}
               disabled={refreshing || loading}
@@ -358,7 +367,7 @@ export default function MeetingsPage() {
           </div>
         )}
 
-        {/* 2-Column Layout: Form & Meetings List */}
+        {/* 2-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left Column: Create Meeting Form */}
           <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
@@ -514,9 +523,13 @@ export default function MeetingsPage() {
                   <div className="bg-slate-100 text-slate-400 w-12 h-12 rounded-2xl flex items-center justify-center mx-auto">
                     <Calendar className="w-6 h-6" />
                   </div>
-                  <h3 className="text-sm font-semibold text-slate-800">No meetings found</h3>
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    {!token && !auth.isLoading ? "Sign in to view meetings" : "No meetings found"}
+                  </h3>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    {searchQuery || statusFilter !== "all"
+                    {!token && !auth.isLoading
+                      ? "Please sign in using the button in the top right to access and manage your meetings."
+                      : searchQuery || statusFilter !== "all"
                       ? "No meetings match your search or filter criteria."
                       : "No meetings have been scheduled yet. Create your first meeting using the form on the left."}
                   </p>

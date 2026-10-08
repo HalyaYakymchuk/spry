@@ -6,3 +6,4 @@ pydantic==2.6.4
 psycopg2-binary==2.9.9
 mangum
 awslambdaric
+pyjwt[crypto]>=2.8.0

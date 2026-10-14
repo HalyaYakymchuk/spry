@@ -1,0 +1,593 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Spry weekly reports infrastructure: private S3 bucket with 90-day lifecycle
+  expiration, S3 Gateway VPC Endpoint, report-builder Lambda function,
+  report-mailer Lambda function outside VPC connected via S3 event notifications,
+  and EventBridge Scheduler rule running every Monday morning at 07:00 Kyiv time.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: peach
+    Description: Prefix for every resource name and the PROJECT_NAME tag.
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-03f80b68db03e5374
+    Description: VPC where the backend and database run.
+
+  RouteTableIds:
+    Type: CommaDelimitedList
+    Default: rtb-0322da6dc44314864
+    Description: Route table(s) to attach the S3 Gateway VPC Endpoint to.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Default: "subnet-04fe7e79faf29e229,subnet-06d8b88438cdd7fe6,subnet-09ed785e26f5e1f0b"
+    Description: Subnets for Lambda VPC access (same as backend API).
+
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Default: "sg-08273d9ca20985b05"
+    Description: Security group IDs for Lambda VPC access (same as backend API).
+
+  ImageUri:
+    Type: String
+    Default: "640012953957.dkr.ecr.eu-north-1.amazonaws.com/peach-backend:reports-step4"
+    Description: Fully qualified image URI in ECR (reuse the backend container image).
+
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Aurora database connection string or Secrets Manager reference.
+
+  Architecture:
+    Type: String
+    Default: arm64
+    AllowedValues: [arm64, x86_64]
+    Description: Lambda execution architecture (Graviton arm64 matches backend API).
+
+  MemorySize:
+    Type: Number
+    Default: 512
+    MinValue: 128
+    MaxValue: 10240
+    Description: Memory allocation for report builder Lambda (MB).
+
+  Timeout:
+    Type: Number
+    Default: 60
+    MinValue: 30
+    MaxValue: 900
+    Description: Timeout for report builder Lambda execution (seconds).
+
+  DomainName:
+    Type: String
+    Default: spry.org.ua
+    Description: Domain name for SES identity and DKIM signing (e.g. spry.org.ua).
+
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: Optional Route 53 hosted zone ID for automatic DKIM DNS records.
+
+  SenderEmail:
+    Type: String
+    # Default: !Sub "reports@${DomainName}"
+    Default: "reports@spry.org.ua"
+    Description: Verified SES email address used as the sender (defaults to reports@${DomainName}).
+
+  RecipientEmail:
+    Type: String
+    Default: "galyayakymchuk19@gmail.com"
+    Description: Recipient email address for weekly reports.
+
+Conditions:
+  HasDatabaseUrl: !Not [!Equals [!Ref DatabaseUrl, ""]]
+  HasHostedZone: !Not [!Equals [!Ref HostedZoneId, ""]]
+
+Resources:
+  # --- SES Domain Identity & DKIM --------------------------------------------
+
+  SesDomainIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref DomainName
+      DkimAttributes:
+        SigningEnabled: true
+      DkimSigningAttributes:
+        # Note: AWS CloudFormation property is NextSigningKeyLength (RSA_2048_BIT).
+        # (NextSigningEnabled is an alias/conflation in prompt; SigningEnabled is set above)
+        NextSigningKeyLength: RSA_2048_BIT
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  DkimRecord1:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHostedZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt SesDomainIdentity.DkimDNSTokenName1
+      Type: CNAME
+      TTL: "300"
+      ResourceRecords:
+        - !GetAtt SesDomainIdentity.DkimDNSTokenValue1
+
+  DkimRecord2:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHostedZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt SesDomainIdentity.DkimDNSTokenName2
+      Type: CNAME
+      TTL: "300"
+      ResourceRecords:
+        - !GetAtt SesDomainIdentity.DkimDNSTokenValue2
+
+  DkimRecord3:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHostedZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt SesDomainIdentity.DkimDNSTokenName3
+      Type: CNAME
+      TTL: "300"
+      ResourceRecords:
+        - !GetAtt SesDomainIdentity.DkimDNSTokenValue3
+
+  # --- Mailer Lambda & IAM Role -----------------------------------------------
+
+  ReportMailerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: MailerS3Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${ProjectName}-reports-${AWS::AccountId}/reports/*"
+                  - !Sub "arn:aws:s3:::${ProjectName}-reports-${AWS::AccountId}-${AWS::Region}/reports/*"
+        - PolicyName: MailerSESPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: "*"
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ReportMailerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-report-mailer"
+      Description: !Sub "${ProjectName} weekly report mailer"
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt ReportMailerRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          SENDER_EMAIL: !Ref SenderEmail
+          RECIPIENT_EMAIL: !Ref RecipientEmail
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import urllib.parse
+          import boto3
+          from email.message import EmailMessage
+
+          s3 = boto3.client('s3')
+          ses = boto3.client('sesv2')
+
+          def handler(event, context):
+              print("report-mailer triggered:", json.dumps(event))
+              record = event["Records"][0]["s3"]
+              bucket = record["bucket"]["name"]
+              key = urllib.parse.unquote_plus(record["object"]["key"])
+              
+              # Extra safeguard: ensure key starts with reports/ and ends with .csv
+              if not (key.startswith("reports/") and key.endswith(".csv")):
+                  print(f"Skipping non-report key: {key}")
+                  return {"status": "skipped"}
+
+              response = s3.get_object(Bucket=bucket, Key=key)
+              csv_data = response["Body"].read()
+
+              filename = os.path.basename(key)
+              sender = os.environ.get("SENDER_EMAIL") or "reports@spry.org.ua"
+              recipient = os.environ.get("RECIPIENT_EMAIL") or sender
+
+              msg = EmailMessage()
+              msg["Subject"] = f"Weekly Insights Report: {filename}"
+              msg["From"] = sender
+              msg["To"] = recipient
+              msg.set_content(f"Hello,\n\nPlease find attached the weekly report for {filename}.\n\nBest regards,\nSpry Team")
+              msg.add_attachment(csv_data, maintype="text", subtype="csv", filename=filename)
+
+              ses.send_email(
+                  FromEmailAddress=sender,
+                  Destination={"ToAddresses": [recipient]},
+                  Content={"Raw": {"Data": msg.as_bytes()}}
+              )
+              print(f"Successfully sent {filename} to {recipient}")
+              return {"status": "sent", "recipient": recipient, "file": filename}
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ReportMailerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt ReportMailerFunction.Arn
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::${ProjectName}-reports-${AWS::AccountId}"
+      SourceAccount: !Ref "AWS::AccountId"
+
+  ReportMailerRegionalPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt ReportMailerFunction.Arn
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::${ProjectName}-reports-${AWS::AccountId}-${AWS::Region}"
+      SourceAccount: !Ref "AWS::AccountId"
+
+  # --- S3 Storage -------------------------------------------------------------
+
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - ReportMailerPermission
+      - ReportMailerRegionalPermission
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub "${ProjectName}-reports-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireReportsAfter90Days
+            Status: Enabled
+            ExpirationInDays: 90
+            Prefix: reports/
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt ReportMailerFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: reports/
+                  - Name: suffix
+                    Value: .csv
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ReportsS3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcId: !Ref VpcId
+      RouteTableIds: !Ref RouteTableIds
+
+  # --- SQS Queues -------------------------------------------------------------
+
+  ReportRequestsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-report-requests-dlq"
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ReportRequestsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-report-requests"
+      VisibilityTimeout: 360
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ReportRequestsDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  # --- Lambda Function & IAM Role ---------------------------------------------
+
+  ReportBuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: PutReportsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:aws:s3:::${ReportsBucket}/reports/*"
+        - PolicyName: ConsumeReportRequestsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt ReportRequestsQueue.Arn
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ReportBuilderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-report-builder"
+      Description: !Sub "${ProjectName} weekly report builder"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command:
+          - "app.reports.lambda_handler.handler"
+      Architectures:
+        - !Ref Architecture
+      MemorySize: !Ref MemorySize
+      Timeout: !Ref Timeout
+      Role: !GetAtt ReportBuilderRole.Arn
+      VpcConfig:
+        SubnetIds: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+      Environment:
+        Variables:
+          DATABASE_URL: !If
+            - HasDatabaseUrl
+            - !Ref DatabaseUrl
+            - "{{resolve:secretsmanager:peach/backend/database-url:SecretString}}"
+          REPORTS_BUCKET_NAME: !Ref ReportsBucket
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  ReportBuilderEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt ReportRequestsQueue.Arn
+      FunctionName: !GetAtt ReportBuilderFunction.Arn
+      BatchSize: 1
+      Enabled: true
+
+  # --- EventBridge Scheduler --------------------------------------------------
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SendReportRequestsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt ReportRequestsQueue.Arn
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  WeeklyReportSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${ProjectName}-weekly-report-schedule"
+      Description: !Sub "${ProjectName} weekly report generation schedule every Monday at 07:00 Europe/Kyiv"
+      ScheduleExpression: "cron(0 7 ? * MON *)"
+      ScheduleExpressionTimezone: "Europe/Kyiv"
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !GetAtt ReportRequestsQueue.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"week": null, "source": "schedule"}'
+
+Outputs:
+  ReportsBucketName:
+    Description: Name of the S3 bucket for weekly reports
+    Value: !Ref ReportsBucket
+    Export:
+      Name: !Sub "${ProjectName}-reports-bucket-name"
+
+  ReportsBucketArn:
+    Description: ARN of the S3 bucket for weekly reports
+    Value: !GetAtt ReportsBucket.Arn
+    Export:
+      Name: !Sub "${ProjectName}-reports-bucket-arn"
+
+  ReportsBucketNameExport:
+    Description: Name of the reports S3 bucket (unprefixed export)
+    Value: !Ref ReportsBucket
+    Export:
+      Name: ReportsBucketName
+
+  ReportsBucketArnExport:
+    Description: ARN of the S3 bucket for weekly reports (unprefixed export)
+    Value: !GetAtt ReportsBucket.Arn
+    Export:
+      Name: ReportsBucketArn
+
+  ReportsBucketNameCamel:
+    Description: Name of the reports S3 bucket (camel-case export)
+    Value: !Ref ReportsBucket
+    Export:
+      Name: !Sub "${ProjectName}-ReportsBucketName"
+
+  ReportsBucketArnCamel:
+    Description: ARN of the S3 bucket for weekly reports (camel-case export)
+    Value: !GetAtt ReportsBucket.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ReportsBucketArn"
+
+  S3EndpointId:
+    Description: ID of the S3 Gateway VPC Endpoint
+    Value: !Ref ReportsS3Endpoint
+    Export:
+      Name: !Sub "${ProjectName}-s3-vpc-endpoint-id"
+
+  ReportBuilderFunctionName:
+    Description: Name of the report-builder Lambda function
+    Value: !Ref ReportBuilderFunction
+    Export:
+      Name: !Sub "${ProjectName}-report-builder-function-name"
+
+  ReportBuilderFunctionArn:
+    Description: ARN of the report-builder Lambda function
+    Value: !GetAtt ReportBuilderFunction.Arn
+    Export:
+      Name: !Sub "${ProjectName}-report-builder-function-arn"
+
+  ReportMailerFunctionName:
+    Description: Name of the report-mailer Lambda function
+    Value: !Ref ReportMailerFunction
+    Export:
+      Name: !Sub "${ProjectName}-report-mailer-function-name"
+
+  ReportMailerFunctionArn:
+    Description: ARN of the report-mailer Lambda function
+    Value: !GetAtt ReportMailerFunction.Arn
+    Export:
+      Name: !Sub "${ProjectName}-report-mailer-function-arn"
+
+  WeeklyReportScheduleArn:
+    Description: ARN of the EventBridge Scheduler schedule
+    Value: !GetAtt WeeklyReportSchedule.Arn
+    Export:
+      Name: !Sub "${ProjectName}-weekly-report-schedule-arn"
+
+  ReportRequestsQueueUrl:
+    Description: URL of the SQS queue for report requests
+    Value: !Ref ReportRequestsQueue
+    Export:
+      Name: !Sub "${ProjectName}-report-requests-queue-url"
+
+  ReportRequestsQueueArn:
+    Description: ARN of the SQS queue for report requests
+    Value: !GetAtt ReportRequestsQueue.Arn
+    Export:
+      Name: !Sub "${ProjectName}-report-requests-queue-arn"
+
+  ReportRequestsDLQUrl:
+    Description: URL of the dead-letter queue for report requests
+    Value: !Ref ReportRequestsDLQ
+    Export:
+      Name: !Sub "${ProjectName}-report-requests-dlq-url"
+
+  ReportRequestsDLQArn:
+    Description: ARN of the dead-letter queue for report requests
+    Value: !GetAtt ReportRequestsDLQ.Arn
+    Export:
+      Name: !Sub "${ProjectName}-report-requests-dlq-arn"
+
+  SesDomainIdentity:
+    Description: SES Domain Identity
+    Value: !Ref SesDomainIdentity
+    Export:
+      Name: !Sub "${ProjectName}-ses-domain-identity"
+
+  DkimDNSTokenName1:
+    Description: Host name for the first DKIM token CNAME record
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenName1
+    Export:
+      Name: !Sub "${ProjectName}-dkim-token-name-1"
+
+  DkimDNSTokenValue1:
+    Description: Value for the first DKIM token CNAME record
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenValue1
+    Export:
+      Name: !Sub "${ProjectName}-dkim-token-value-1"
+
+  DkimDNSTokenName2:
+    Description: Host name for the second DKIM token CNAME record
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenName2
+    Export:
+      Name: !Sub "${ProjectName}-dkim-token-name-2"
+
+  DkimDNSTokenValue2:
+    Description: Value for the second DKIM token CNAME record
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenValue2
+    Export:
+      Name: !Sub "${ProjectName}-dkim-token-value-2"
+
+  DkimDNSTokenName3:
+    Description: Host name for the third DKIM token CNAME record
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenName3
+    Export:
+      Name: !Sub "${ProjectName}-dkim-token-name-3"
+
+  DkimDNSTokenValue3:
+    Description: Value for the third DKIM token CNAME record
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenValue3
+    Export:
+      Name: !Sub "${ProjectName}-dkim-token-value-3"
+
+  DkimDNSToken1:
+    Description: First DKIM DNS token CNAME name
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenName1
+
+  DkimDNSToken2:
+    Description: Second DKIM DNS token CNAME name
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenName2
+
+  DkimDNSToken3:
+    Description: Third DKIM DNS token CNAME name
+    Value: !GetAtt SesDomainIdentity.DkimDNSTokenName3

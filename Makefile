@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-cognito destroy-cognito deploy-backend destroy-backend logs-backend migrate-backend cert domain deploy-frontend destroy-frontend github-role
+.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-cognito destroy-cognito deploy-backend destroy-backend logs-backend migrate-backend cert domain deploy-frontend destroy-frontend deploy-reports destroy-reports github-role report-now
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -82,5 +82,19 @@ deploy-frontend: ## Build the static export against BACKEND_URL and ship it to S
 destroy-frontend: ## Delete the frontend stack (bucket + distribution)
 	./scripts/destroy-frontend.sh
 
+deploy-reports: ## Create/update reports stack: S3 bucket, endpoint, Lambda builder & weekly schedule
+	./scripts/deploy-reports.sh
+
+destroy-reports: ## Delete the reports stack (bucket + S3 Gateway VPC Endpoint)
+	./scripts/destroy-reports.sh
+
 github-role: ## Create the IAM role GitHub Actions assumes to deploy (OIDC, no keys)
 	./scripts/github-role.sh
+
+report-now: ## Trigger on-demand weekly report generation: make report-now WEEK=2026-W39
+	@QUEUE_URL=$$(aws cloudformation describe-stacks --stack-name peach-reports --region eu-north-1 --query "Stacks[0].Outputs[?OutputKey=='ReportRequestsQueueUrl'].OutputValue" --output text); \
+	aws sqs send-message \
+	  --queue-url "$$QUEUE_URL" \
+	  --region eu-north-1 \
+	  --message-body '{"week": "$(WEEK)", "source": "manual"}'
+

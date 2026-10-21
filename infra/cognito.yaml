@@ -13,12 +13,12 @@ Parameters:
 
   CallbackUrls:
     Type: CommaDelimitedList
-    Default: "http://localhost:3000"
+    Default: "http://localhost:3000,http://localhost:3000/,http://localhost:3000/auth/callback,http://localhost:3000/auth/callback/,https://d2l89vyn3q02js.cloudfront.net,https://d2l89vyn3q02js.cloudfront.net/,https://d2l89vyn3q02js.cloudfront.net/auth/callback,https://d2l89vyn3q02js.cloudfront.net/auth/callback/"
     Description: Comma-separated allowed OAuth callback URLs for the app client.
 
   LogoutUrls:
     Type: CommaDelimitedList
-    Default: "http://localhost:3000"
+    Default: "http://localhost:3000,http://localhost:3000/,https://d2l89vyn3q02js.cloudfront.net,https://d2l89vyn3q02js.cloudfront.net/"
     Description: Comma-separated allowed logout URLs for the app client.
 
   DomainPrefix:
@@ -111,6 +111,7 @@ Resources:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthFlows:
         - code

@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
+from typing import Optional
 
 from pydantic import BaseModel, Field, field_serializer, field_validator
+
+from app.schemas.agenda import AgendaResponse
 
 
 class MeetingBase(BaseModel):
@@ -23,6 +26,7 @@ class MeetingCreate(MeetingBase):
 
 class MeetingResponse(MeetingBase):
     id: int
+    agenda: Optional[AgendaResponse] = None
 
     @field_serializer("starts_at", "ends_at")
     def serialize_dt(self, dt: datetime, _info):

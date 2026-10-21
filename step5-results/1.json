@@ -1,0 +1,39 @@
+{
+  "agenda": {
+    "title": "Оновлення інфраструктури",
+    "starts_at": "2026-10-22T14:00:00+03:00",
+    "duration_minutes": 45,
+    "items": [
+      {
+        "topic": "Огляд поточного стану CloudWatch логів",
+        "owner": "Олексій",
+        "minutes": 15
+      },
+      {
+        "topic": "Міграція на нову версію моделі Haiku",
+        "owner": "Марія",
+        "minutes": 20
+      },
+      {
+        "topic": "Обговорення бюджету на наступний місяць",
+        "owner": null,
+        "minutes": 10
+      }
+    ],
+    "action_items": [
+      {
+        "task": "Надіслати звіт",
+        "owner": "Олексій",
+        "due": "2026-10-21"
+      },
+      {
+        "task": "Підготувати конфігурацію",
+        "owner": "Марія",
+        "due": "2026-10-23"
+      }
+    ],
+    "language": "uk"
+  },
+  "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "prompt_version": "agenda-v1"
+}

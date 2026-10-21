@@ -12,22 +12,50 @@ import {
   Search,
   CalendarCheck,
   TrendingUp,
+  Sparkles,
+  FileText,
 } from "lucide-react";
 import { useAuth } from "react-oidc-context";
-import { getApiUrl } from "@/lib/api";
+import { getApiUrl, Meeting, Agenda } from "@/lib/api";
 import { AuthHeader } from "@/components/AuthHeader";
-
-interface Meeting {
-  id: number;
-  title: string;
-  starts_at: string;
-  ends_at: string;
-  attendee_count: number;
-}
+import { AgendaManager } from "@/components/AgendaManager";
 
 export default function MeetingsPage() {
   const auth = useAuth();
-  const token = auth.user?.access_token || auth.user?.id_token;
+  const [authTimedOut, setAuthTimedOut] = useState(false);
+  const [fallbackToken, setFallbackToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored =
+        localStorage.getItem("token") ||
+        localStorage.getItem("fallback_token") ||
+        localStorage.getItem("id_token") ||
+        process.env.NEXT_PUBLIC_FALLBACK_TOKEN;
+      if (stored) {
+        setFallbackToken(stored);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!auth.isLoading) {
+      setAuthTimedOut(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setAuthTimedOut(true);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [auth.isLoading]);
+
+  const isAuthLoading = auth.isLoading && !authTimedOut;
+  const token =
+    auth.user?.id_token ||
+    auth.user?.access_token ||
+    fallbackToken ||
+    process.env.NEXT_PUBLIC_FALLBACK_TOKEN ||
+    undefined;
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +63,15 @@ export default function MeetingsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Selected meeting for Agenda management
+  const [selectedMeetingForAgenda, setSelectedMeetingForAgenda] =
+    useState<Meeting | null>(null);
+
+  // Left sidebar tab: "create" or "agenda"
+  const [leftTab, setLeftTab] = useState<"create" | "agenda">("create");
+  const [selectedMeetingIdForInlineAgenda, setSelectedMeetingIdForInlineAgenda] =
+    useState<number | null>(null);
 
   // Form State
   const [title, setTitle] = useState("");
@@ -88,14 +125,14 @@ export default function MeetingsPage() {
   );
 
   useEffect(() => {
-    if (auth.isLoading) return;
+    if (isAuthLoading) return;
     if (token) {
       fetchMeetings();
     } else {
       setLoading(false);
       setMeetings([]);
     }
-  }, [auth.isLoading, token, fetchMeetings]);
+  }, [isAuthLoading, token, fetchMeetings]);
 
   const handleCreateMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -277,6 +314,19 @@ export default function MeetingsPage() {
     });
   }, [meetings, searchQuery, statusFilter]);
 
+  const inlineSelectedMeeting = useMemo(() => {
+    if (!selectedMeetingIdForInlineAgenda) return undefined;
+    return meetings.find((m) => m.id === selectedMeetingIdForInlineAgenda) || undefined;
+  }, [meetings, selectedMeetingIdForInlineAgenda]);
+
+  const handleAgendaUpdated = (updatedAgenda: Agenda) => {
+    setMeetings((prev) =>
+      prev.map((m) =>
+        m.id === updatedAgenda.meeting_id ? { ...m, agenda: updatedAgenda } : m
+      )
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
       {/* Header */}
@@ -369,108 +419,191 @@ export default function MeetingsPage() {
 
         {/* 2-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Left Column: Create Meeting Form */}
+          {/* Left Column: Create Meeting Form OR Inline Agenda Selector */}
           <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
-            <div className="flex items-center gap-2 mb-4">
-              <PlusCircle className="w-5 h-5 text-indigo-600" />
-              <h2 className="text-lg font-bold text-slate-900">Add New Meeting</h2>
-            </div>
-            <p className="text-xs text-slate-500 mb-6">
-              Fill in the meeting details to schedule a new session.
-            </p>
-
-            {formError && (
-              <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
-                <span>{formError}</span>
-              </div>
-            )}
-
-            {successMessage && (
-              <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2 rounded-lg text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
-                <span>{successMessage}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleCreateMeeting} className="space-y-4">
-              <div>
-                <label htmlFor="title" className="block text-xs font-semibold text-slate-700 mb-1">
-                  Meeting Title <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="title"
-                  type="text"
-                  required
-                  maxLength={255}
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g., Weekly Team Sync"
-                  className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900 placeholder:text-slate-400"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="startsAt" className="block text-xs font-semibold text-slate-700 mb-1">
-                  Starts At <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="startsAt"
-                  type="datetime-local"
-                  required
-                  value={startsAt}
-                  onChange={(e) => setStartsAt(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="endsAt" className="block text-xs font-semibold text-slate-700 mb-1">
-                  Ends At <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="endsAt"
-                  type="datetime-local"
-                  required
-                  value={endsAt}
-                  onChange={(e) => setEndsAt(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="attendees" className="block text-xs font-semibold text-slate-700 mb-1">
-                  Attendee Count <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="attendees"
-                  type="number"
-                  required
-                  min={1}
-                  value={attendeeCount}
-                  onChange={(e) => setAttendeeCount(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900"
-                />
-              </div>
-
+            {/* Tabs for Left Column */}
+            <div className="flex items-center border-b border-slate-200 mb-5 gap-2">
               <button
-                type="submit"
-                disabled={submitting}
-                className="w-full mt-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-xl shadow-sm transition-colors disabled:opacity-50"
+                type="button"
+                onClick={() => setLeftTab("create")}
+                className={`pb-2.5 text-xs font-bold transition-colors border-b-2 flex items-center gap-1.5 ${
+                  leftTab === "create"
+                    ? "border-indigo-600 text-indigo-600"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
               >
-                {submitting ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Scheduling...
-                  </>
-                ) : (
-                  <>
-                    <PlusCircle className="w-4 h-4" />
-                    Schedule Meeting
-                  </>
-                )}
+                <PlusCircle className="w-4 h-4" />
+                New Meeting
               </button>
-            </form>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeftTab("agenda");
+                  if (!selectedMeetingIdForInlineAgenda && meetings.length > 0) {
+                    setSelectedMeetingIdForInlineAgenda(meetings[0].id);
+                  }
+                }}
+                className={`pb-2.5 text-xs font-bold transition-colors border-b-2 flex items-center gap-1.5 ${
+                  leftTab === "agenda"
+                    ? "border-indigo-600 text-indigo-600"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <Sparkles className="w-4 h-4" />
+                Meeting Agenda
+              </button>
+            </div>
+
+            {leftTab === "create" ? (
+              <>
+                <p className="text-xs text-slate-500 mb-6">
+                  Fill in the meeting details to schedule a new session.
+                </p>
+
+                {formError && (
+                  <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                    <span>{formError}</span>
+                  </div>
+                )}
+
+                {successMessage && (
+                  <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2 rounded-lg text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                    <span>{successMessage}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleCreateMeeting} className="space-y-4">
+                  <div>
+                    <label htmlFor="title" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Meeting Title <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="title"
+                      type="text"
+                      required
+                      maxLength={255}
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="e.g., Weekly Team Sync"
+                      className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900 placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="startsAt" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Starts At <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="startsAt"
+                      type="datetime-local"
+                      required
+                      value={startsAt}
+                      onChange={(e) => setStartsAt(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="endsAt" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Ends At <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="endsAt"
+                      type="datetime-local"
+                      required
+                      value={endsAt}
+                      onChange={(e) => setEndsAt(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="attendees" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Attendee Count <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="attendees"
+                      type="number"
+                      required
+                      min={1}
+                      value={attendeeCount}
+                      onChange={(e) => setAttendeeCount(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full mt-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-xl shadow-sm transition-colors disabled:opacity-50"
+                  >
+                    {submitting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Scheduling...
+                      </>
+                    ) : (
+                      <>
+                        <PlusCircle className="w-4 h-4" />
+                        Schedule Meeting
+                      </>
+                    )}
+                  </button>
+                </form>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-500">
+                  Select a meeting to view, paste, and manage its agenda using AI.
+                </p>
+
+                {meetings.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic py-4 text-center">
+                    No scheduled meetings available. Create a meeting first.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label htmlFor="meeting-select" className="block text-xs font-semibold text-slate-700 mb-1">
+                        Select Meeting
+                      </label>
+                      <select
+                        id="meeting-select"
+                        value={selectedMeetingIdForInlineAgenda || ""}
+                        onChange={(e) =>
+                          setSelectedMeetingIdForInlineAgenda(
+                            Number(e.target.value) || null
+                          )
+                        }
+                        className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900"
+                      >
+                        {meetings.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.title} (
+                            {new Date(m.starts_at).toLocaleDateString()})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {inlineSelectedMeeting && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedMeetingForAgenda(inlineSelectedMeeting)
+                        }
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition-colors"
+                      >
+                        <Sparkles className="w-4 h-4 text-indigo-200" />
+                        Open Agenda Workspace
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Right Column: Meetings Display */}
@@ -524,10 +657,10 @@ export default function MeetingsPage() {
                     <Calendar className="w-6 h-6" />
                   </div>
                   <h3 className="text-sm font-semibold text-slate-800">
-                    {!token && !auth.isLoading ? "Sign in to view meetings" : "No meetings found"}
+                    {!token && !isAuthLoading ? "Sign in to view meetings" : "No meetings found"}
                   </h3>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    {!token && !auth.isLoading
+                    {!token && !isAuthLoading
                       ? "Please sign in using the button in the top right to access and manage your meetings."
                       : searchQuery || statusFilter !== "all"
                       ? "No meetings match your search or filter criteria."
@@ -543,13 +676,15 @@ export default function MeetingsPage() {
                       meeting.ends_at
                     );
                     const duration = getDurationString(meeting.starts_at, meeting.ends_at);
+                    const hasAgenda = !!meeting.agenda;
+                    const isAiAugmented = !!meeting.agenda?.ai_suggestion;
 
                     return (
                       <div
                         key={meeting.id}
                         className="p-5 hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                       >
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 flex-1">
                           <div className="flex items-center gap-2.5">
                             <h4 className="text-sm font-semibold text-slate-900">
                               {meeting.title}
@@ -559,6 +694,18 @@ export default function MeetingsPage() {
                             >
                               {status.label}
                             </span>
+                            {hasAgenda && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <FileText className="w-3 h-3 text-emerald-600" />
+                                Agenda ({meeting.agenda?.items?.length || 0})
+                              </span>
+                            )}
+                            {isAiAugmented && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200">
+                                <Sparkles className="w-2.5 h-2.5 text-violet-600" />
+                                AI
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
@@ -570,14 +717,23 @@ export default function MeetingsPage() {
                               <Clock className="w-3.5 h-3.5 text-slate-400" />
                               {timeStr} ({duration})
                             </span>
+                            <span className="inline-flex items-center gap-1.5">
+                              <Users className="w-3.5 h-3.5 text-slate-400" />
+                              {meeting.attendee_count} {meeting.attendee_count === 1 ? "attendee" : "attendees"}
+                            </span>
                           </div>
                         </div>
 
+                        {/* Actions */}
                         <div className="flex items-center gap-2 self-start sm:self-center">
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-700 text-xs font-medium rounded-lg">
-                            <Users className="w-3.5 h-3.5 text-slate-400" />
-                            {meeting.attendee_count} {meeting.attendee_count === 1 ? "attendee" : "attendees"}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMeetingForAgenda(meeting)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/60 rounded-xl transition-colors shadow-xs"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                            {hasAgenda ? "View / Edit Agenda" : "Paste Agenda"}
+                          </button>
                         </div>
                       </div>
                     );
@@ -587,6 +743,22 @@ export default function MeetingsPage() {
             </div>
           </div>
         </div>
+
+        {/* Selected Meeting Agenda Workspace (Modal View) */}
+        {selectedMeetingForAgenda && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+            <div className="w-full max-w-5xl my-auto animate-in fade-in zoom-in-95 duration-150">
+              <AgendaManager
+                meeting={selectedMeetingForAgenda}
+                token={token}
+                onClose={() => setSelectedMeetingForAgenda(null)}
+                onSaved={(updatedAgenda) => {
+                  handleAgendaUpdated(updatedAgenda);
+                }}
+              />
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

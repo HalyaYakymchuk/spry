@@ -8,3 +8,4 @@ mangum
 awslambdaric
 pyjwt[crypto]>=2.8.0
 boto3
+anthropic[bedrock]

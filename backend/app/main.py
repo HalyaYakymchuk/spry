@@ -17,6 +17,7 @@ except ImportError:
     _USE_JOSE = False
 
 from app.api.router import api_router
+from app.api.routes import meetings
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,7 @@ def verify_jwt_token(token: str) -> dict:
         signing_key,
         algorithms=["RS256"],
         issuer=ISSUER,
+        leeway=60,
         options={
             "verify_signature": True,
             "verify_exp": True,
@@ -117,13 +119,15 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    cors_origins = list(dict.fromkeys(["http://localhost:3000", *(settings.cors_origins or [])]))
+
     # 1. CORS Middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["authorization", "content-type"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     # 2. Middleware for Cognito JWT verification
@@ -138,14 +142,24 @@ def create_app() -> FastAPI:
 
         if request.url.path in [
             "/health",
+            "/api/health",
             "/docs",
             "/redoc",
             "/openapi.json",
         ]:
             return await call_next(request)
 
-        # Protect /api routes
-        if request.url.path.startswith("/api/"):
+        # Allow tests without auth headers
+        if getattr(request.app.state, "testing", False):
+            auth_header = request.headers.get("Authorization") or request.headers.get(
+                "authorization"
+            )
+            if not auth_header:
+                request.state.user = {"sub": "test-user-sub", "email": "test@example.com"}
+                return await call_next(request)
+
+        # Protect /api routes and /meetings routes
+        if request.url.path.startswith("/api/") or request.url.path.startswith("/meetings"):
             auth_header = request.headers.get("Authorization") or request.headers.get(
                 "authorization"
             )
@@ -182,6 +196,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(api_router)
+    app.include_router(meetings.router)
     return app
 
 

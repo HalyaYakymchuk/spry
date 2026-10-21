@@ -24,6 +24,12 @@ class Settings(BaseModel):
     cognito_client_id: str = os.getenv("COGNITO_CLIENT_ID", "")
     cognito_jwks: str = os.getenv("COGNITO_JWKS", "")
 
+    aws_region: str = os.getenv("AWS_REGION", "eu-north-1")
+    parser_model: str = os.getenv(
+        "PARSER_MODEL", "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
+    parser_function_url: str = os.getenv("PARSER_FUNCTION_URL", "")
+
     @property
     def cognito_issuer(self) -> str:
         return (

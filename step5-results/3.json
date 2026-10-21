@@ -1,0 +1,24 @@
+{
+  "agenda": {
+    "title": "Release Alignment Call",
+    "starts_at": "2026-10-27T13:00:00+03:00",
+    "duration_minutes": 30,
+    "items": [
+      {
+        "topic": "Release checklist",
+        "owner": "Dave",
+        "minutes": 30
+      }
+    ],
+    "action_items": [
+      {
+        "task": "Finalize deployment scripts by end of week",
+        "owner": null,
+        "due": "2026-10-23"
+      }
+    ],
+    "language": "en"
+  },
+  "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "prompt_version": "agenda-v1"
+}

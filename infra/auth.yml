@@ -81,8 +81,12 @@ Resources:
         - COGNITO
         - Google
       CallbackURLs:
+        - !Sub 'https://${CloudFrontDomain}'
+        - !Sub 'https://${CloudFrontDomain}/'
         - !Sub 'https://${CloudFrontDomain}/auth/callback'
         - !Sub 'https://${CloudFrontDomain}/auth/callback/'
+        - !Sub 'http://localhost:${FrontendPort}'
+        - !Sub 'http://localhost:${FrontendPort}/'
         - !Sub 'http://localhost:${FrontendPort}/auth/callback'
         - !Sub 'http://localhost:${FrontendPort}/auth/callback/'
       LogoutURLs:
@@ -90,6 +94,13 @@ Resources:
         - !Sub 'https://${CloudFrontDomain}/'
         - !Sub 'http://localhost:${FrontendPort}'
         - !Sub 'http://localhost:${FrontendPort}/'
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
 
   ManagedLoginBranding:
     Type: AWS::Cognito::ManagedLoginBranding

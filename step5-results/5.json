@@ -1,0 +1,18 @@
+{
+  "agenda": {
+    "title": "Security Compliance Review",
+    "starts_at": null,
+    "duration_minutes": 15,
+    "items": [
+      {
+        "topic": "Review IAM policies",
+        "owner": null,
+        "minutes": 15
+      }
+    ],
+    "action_items": [],
+    "language": "en"
+  },
+  "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "prompt_version": "agenda-v1"
+}

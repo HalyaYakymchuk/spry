@@ -1,0 +1,34 @@
+{
+  "agenda": {
+    "title": "Sprint Progress Sync",
+    "starts_at": "2026-10-22T11:00:00+02:00",
+    "duration_minutes": 45,
+    "items": [
+      {
+        "topic": "Sprint review and blocker analysis",
+        "owner": "John",
+        "minutes": 25
+      },
+      {
+        "topic": "Q4 roadmap planning",
+        "owner": "Sarah",
+        "minutes": 20
+      }
+    ],
+    "action_items": [
+      {
+        "task": "Update Jira tickets",
+        "owner": "John",
+        "due": "2026-10-22"
+      },
+      {
+        "task": "Share roadmap slides",
+        "owner": "Sarah",
+        "due": "2026-10-23"
+      }
+    ],
+    "language": "en"
+  },
+  "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "prompt_version": "agenda-v1"
+}

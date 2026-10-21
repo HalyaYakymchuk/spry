@@ -1,0 +1,9 @@
+{
+  "BudgetName": "peach-monthly-cost-budget",
+  "BudgetLimit": {
+    "Amount": "5.0",
+    "Unit": "USD"
+  },
+  "TimeUnit": "MONTHLY",
+  "BudgetType": "COST"
+}

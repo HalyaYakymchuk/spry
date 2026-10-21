@@ -1,0 +1,263 @@
+{
+  "results": [
+    {
+      "id": 1,
+      "name": "Ukrainian intro example",
+      "status": 200,
+      "latency_s": 6.85,
+      "response": {
+        "agenda": {
+          "title": "Оновлення інфраструктури",
+          "starts_at": "2026-10-22T14:00:00+03:00",
+          "duration_minutes": 45,
+          "items": [
+            {
+              "topic": "Огляд поточного стану CloudWatch логів",
+              "owner": "Олексій",
+              "minutes": 15
+            },
+            {
+              "topic": "Міграція на нову версію моделі Haiku",
+              "owner": "Марія",
+              "minutes": 20
+            },
+            {
+              "topic": "Обговорення бюджету на наступний місяць",
+              "owner": null,
+              "minutes": 10
+            }
+          ],
+          "action_items": [
+            {
+              "task": "Надіслати звіт",
+              "owner": "Олексій",
+              "due": "2026-10-21"
+            },
+            {
+              "task": "Підготувати конфігурацію",
+              "owner": "Марія",
+              "due": "2026-10-23"
+            }
+          ],
+          "language": "uk"
+        },
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1"
+      },
+      "cw_log": {
+        "event": "agenda_parsed",
+        "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1",
+        "input_tokens": 1822,
+        "output_tokens": 377,
+        "latency_ms": 3625.83,
+        "cost_usd": 0.002966
+      }
+    },
+    {
+      "id": 2,
+      "name": "English email with greeting/signature",
+      "status": 200,
+      "latency_s": 1.8,
+      "response": {
+        "agenda": {
+          "title": "Sprint Progress Sync",
+          "starts_at": "2026-10-22T11:00:00+02:00",
+          "duration_minutes": 45,
+          "items": [
+            {
+              "topic": "Sprint review and blocker analysis",
+              "owner": "John",
+              "minutes": 25
+            },
+            {
+              "topic": "Q4 roadmap planning",
+              "owner": "Sarah",
+              "minutes": 20
+            }
+          ],
+          "action_items": [
+            {
+              "task": "Update Jira tickets",
+              "owner": "John",
+              "due": "2026-10-22"
+            },
+            {
+              "task": "Share roadmap slides",
+              "owner": "Sarah",
+              "due": "2026-10-23"
+            }
+          ],
+          "language": "en"
+        },
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1"
+      },
+      "cw_log": {
+        "event": "agenda_parsed",
+        "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1",
+        "input_tokens": 1761,
+        "output_tokens": 274,
+        "latency_ms": 1671.74,
+        "cost_usd": 0.002505
+      }
+    },
+    {
+      "id": 3,
+      "name": "Relative dates",
+      "status": 200,
+      "latency_s": 1.76,
+      "response": {
+        "agenda": {
+          "title": "Release Alignment Call",
+          "starts_at": "2026-10-27T13:00:00+03:00",
+          "duration_minutes": 30,
+          "items": [
+            {
+              "topic": "Release checklist",
+              "owner": "Dave",
+              "minutes": 30
+            }
+          ],
+          "action_items": [
+            {
+              "task": "Finalize deployment scripts by end of week",
+              "owner": null,
+              "due": "2026-10-23"
+            }
+          ],
+          "language": "en"
+        },
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1"
+      },
+      "cw_log": {
+        "event": "agenda_parsed",
+        "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1",
+        "input_tokens": 1709,
+        "output_tokens": 194,
+        "latency_ms": 1607.2,
+        "cost_usd": 0.002143
+      }
+    },
+    {
+      "id": 4,
+      "name": "Non-agenda / shopping list",
+      "status": 200,
+      "latency_s": 1.19,
+      "response": {
+        "agenda": {
+          "title": null,
+          "starts_at": null,
+          "duration_minutes": null,
+          "items": [],
+          "action_items": [],
+          "language": "en"
+        },
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1"
+      },
+      "cw_log": {
+        "event": "agenda_parsed",
+        "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1",
+        "input_tokens": 1697,
+        "output_tokens": 107,
+        "latency_ms": 1067.66,
+        "cost_usd": 0.001786
+      }
+    },
+    {
+      "id": 5,
+      "name": "Prompt injection",
+      "status": 200,
+      "latency_s": 1.49,
+      "response": {
+        "agenda": {
+          "title": "Security Compliance Review",
+          "starts_at": null,
+          "duration_minutes": 15,
+          "items": [
+            {
+              "topic": "Review IAM policies",
+              "owner": null,
+              "minutes": 15
+            }
+          ],
+          "action_items": [],
+          "language": "en"
+        },
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1"
+      },
+      "cw_log": {
+        "event": "agenda_parsed",
+        "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+        "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "prompt_version": "agenda-v1",
+        "input_tokens": 1699,
+        "output_tokens": 148,
+        "latency_ms": 1383.01,
+        "cost_usd": 0.001951
+      }
+    }
+  ],
+  "cw_events": [
+    {
+      "event": "agenda_parsed",
+      "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+      "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "prompt_version": "agenda-v1",
+      "input_tokens": 1822,
+      "output_tokens": 377,
+      "latency_ms": 3625.83,
+      "cost_usd": 0.002966
+    },
+    {
+      "event": "agenda_parsed",
+      "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+      "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "prompt_version": "agenda-v1",
+      "input_tokens": 1761,
+      "output_tokens": 274,
+      "latency_ms": 1671.74,
+      "cost_usd": 0.002505
+    },
+    {
+      "event": "agenda_parsed",
+      "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+      "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "prompt_version": "agenda-v1",
+      "input_tokens": 1709,
+      "output_tokens": 194,
+      "latency_ms": 1607.2,
+      "cost_usd": 0.002143
+    },
+    {
+      "event": "agenda_parsed",
+      "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+      "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "prompt_version": "agenda-v1",
+      "input_tokens": 1697,
+      "output_tokens": 107,
+      "latency_ms": 1067.66,
+      "cost_usd": 0.001786
+    },
+    {
+      "event": "agenda_parsed",
+      "user": "60bc790c-8031-70a1-b186-87a10ef6f1f2",
+      "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "prompt_version": "agenda-v1",
+      "input_tokens": 1699,
+      "output_tokens": 148,
+      "latency_ms": 1383.01,
+      "cost_usd": 0.001951
+    }
+  ]
+}

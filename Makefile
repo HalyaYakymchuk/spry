@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-cognito destroy-cognito deploy-backend destroy-backend logs-backend migrate-backend cert domain deploy-frontend destroy-frontend deploy-reports destroy-reports github-role report-now
+.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-cognito destroy-cognito deploy-backend destroy-backend logs-backend migrate-backend cert domain deploy-frontend destroy-frontend deploy-reports destroy-reports deploy-parser destroy-parser logs-parser test-agenda-lambda verify-step4 github-role report-now llm-hello parse
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -88,6 +88,21 @@ deploy-reports: ## Create/update reports stack: S3 bucket, endpoint, Lambda buil
 destroy-reports: ## Delete the reports stack (bucket + S3 Gateway VPC Endpoint)
 	./scripts/destroy-reports.sh
 
+deploy-parser: ## Deploy the agenda parser Lambda function and Function URL (Bedrock Claude eu-north-1)
+	./scripts/deploy-parser.sh
+
+destroy-parser: ## Delete the agenda parser stack
+	./scripts/destroy-parser.sh
+
+logs-parser: ## Tail the agenda parser Lambda CloudWatch logs
+	aws logs tail /aws/lambda/$${PROJECT_NAME:-peach}-agenda-parser --follow --since 10m
+
+test-agenda-lambda: ## Run verification tests against deployed agenda parser Function URL (200, 401, 413)
+	@"$(PYTHON)" scripts/test_agenda_lambda.py
+
+verify-step4: ## Verify Part 4 Step 4: The screen (paste, check, save flow)
+	@"$(PYTHON)" scripts/verify_step4_screen_flow.py
+
 github-role: ## Create the IAM role GitHub Actions assumes to deploy (OIDC, no keys)
 	./scripts/github-role.sh
 
@@ -97,4 +112,17 @@ report-now: ## Trigger on-demand weekly report generation: make report-now WEEK=
 	  --queue-url "$$QUEUE_URL" \
 	  --region eu-north-1 \
 	  --message-body '{"week": "$(WEEK)", "source": "manual"}'
+
+PARSER_MODEL ?= eu.anthropic.claude-haiku-4-5-20251001-v1:0
+AWS_REGION ?= eu-north-1
+VENV_PYTHON := $(shell if [ -f "backend/.venv/Scripts/python.exe" ]; then echo "backend/.venv/Scripts/python.exe"; elif [ -f "backend/.venv/bin/python" ]; then echo "backend/.venv/bin/python"; else which python 2>/dev/null || echo python; fi)
+PYTHON ?= $(VENV_PYTHON)
+
+llm-hello: ## Test Bedrock Anthropic Claude connectivity in eu-north-1: make llm-hello
+	@PARSER_MODEL="$(PARSER_MODEL)" AWS_REGION="$(AWS_REGION)" "$(PYTHON)" backend/scripts/llm_hello.py
+
+TEXT ?= Meeting tomorrow at 10am to discuss Q4 budget. John leads for 30m. Action: Sarah to send sheet by Friday.
+
+parse: ## Parse meeting agenda text using Bedrock Claude: make parse TEXT="..."
+	@PARSER_MODEL="$(PARSER_MODEL)" AWS_REGION="$(AWS_REGION)" "$(PYTHON)" backend/scripts/run_parse.py --text "$(TEXT)"
 

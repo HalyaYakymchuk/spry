@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AWS Budgets configuration for Spry / Peach: $5.00 USD monthly cost budget with
+  email alerts on 100% actual spend and 80% forecasted spend.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: peach
+    Description: Prefix for every resource name and tag.
+
+  MonthlyBudgetLimit:
+    Type: Number
+    Default: 5.0
+    Description: Monthly budget limit in USD.
+
+  NotificationEmail:
+    Type: String
+    Default: yakymchuk.pn@ucu.edu.ua
+    Description: Email address for budget alert notifications.
+
+Resources:
+  MonthlyCostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "${ProjectName}-monthly-cost-budget"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetLimit
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref NotificationEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref NotificationEmail
+
+Outputs:
+  BudgetName:
+    Description: Name of the created monthly cost budget
+    Value: !Ref MonthlyCostBudget

@@ -397,11 +397,47 @@ make logs-backend        # tail CloudWatch
 make destroy-backend     # delete everything, database included
 ```
 
-`infra/backend.yaml` is the whole architecture in one CloudFormation stack:
+`infra/backend.yaml` and `infra/parser.yaml` define the core architecture across AWS:
 
+```mermaid
+flowchart TB
+    User["User (Organizer)"]
+
+    subgraph ClientLayer ["Client Layer"]
+        Browser["Web Browser (Next.js 14 / React Frontend)"]
+    end
+
+    subgraph AWS_Cloud ["AWS Cloud (Region: eu-north-1)"]
+        subgraph ServerlessEdge ["Serverless Edge (Outside VPC)"]
+            ParserLambda["Agenda Parser Lambda\nAWS Lambda Container (Python 3.12)\nFunction URL (AuthType: NONE)\nCognito JWT Verified in Handler"]
+        end
+
+        subgraph AWSManaged ["AWS Managed AI Services"]
+            Bedrock["Amazon Bedrock\neu.anthropic.claude-haiku-4-5-20251001-v1:0\n(Claude Haiku 4.5 in eu-north-1)"]
+        end
+
+        subgraph VPC ["AWS VPC (Isolated: No NAT Gateway)"]
+            BackendLambda["Backend Core API Lambda\nPython 3.12 / FastAPI via Mangum\n(Private Subnets)"]
+            AuroraDB[("Aurora Serverless v2\nPostgreSQL 17.4 (:5432)\nStores Agendas and ai_suggestion Snapshot")]
+        end
+    end
+
+    User -->|"Interacts with UI"| Browser
+
+    %% Flow 1: parse
+    Browser -->|"parse: HTTPS POST raw text (Cognito JWT, stateless, read-only)"| ParserLambda
+    ParserLambda -->|"InvokeModel (Tool: record_agenda)"| Bedrock
+    Bedrock -.->|"JSON tool result"| ParserLambda
+    ParserLambda -.->|"JSON suggestion out"| Browser
+
+    %% Flow 2: save
+    Browser -->|"save: HTTPS POST /api/meetings/{id}/agenda (User-reviewed agenda + ai_suggestion snapshot)"| BackendLambda
+    BackendLambda -->|"SQL INSERT/UPDATE (agendas table with ai_suggestion and prompt_version)"| AuroraDB
 ```
-internet -> Lambda function URL (HTTPS) -> Lambda (FastAPI via Mangum, in the VPC) -> Aurora Serverless v2 :5432
-```
+
+**Architecture Flows:**
+1. **parse:** Browser -> Agenda Parser Lambda -> Amazon Bedrock. HTTPS, raw text in, JSON suggestion out, read-only, stateless. The parser runs outside the VPC with no network path to Aurora or internal services.
+2. **save:** Browser -> Backend API Lambda (in VPC) -> Aurora Serverless v2. The user-reviewed and finalized agenda is saved through the normal authenticated API, persisting both the finalized agenda and the raw `ai_suggestion` snapshot and `prompt_version` in the `agendas` table.
 
 `scripts/deploy-backend.sh` drives it, in order:
 

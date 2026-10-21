@@ -82,14 +82,14 @@ log "account ${ACCOUNT_ID} in ${AWS_REGION} as ${CALLER}"
 
 # --- parameters -------------------------------------------------------------
 
-CALLBACK_URLS="${COGNITO_CALLBACK_URLS:-http://localhost:3000}"
+CALLBACK_URLS="${COGNITO_CALLBACK_URLS:-http://localhost:3000,http://localhost:3000/,http://localhost:3000/auth/callback,http://localhost:3000/auth/callback/}"
 if [[ -n "${SITE_URL:-}" && "${CALLBACK_URLS}" != *"${SITE_URL}"* ]]; then
-  CALLBACK_URLS="${CALLBACK_URLS},${SITE_URL}"
+  CALLBACK_URLS="${CALLBACK_URLS},${SITE_URL},${SITE_URL}/,${SITE_URL}/auth/callback,${SITE_URL}/auth/callback/"
 fi
 
-LOGOUT_URLS="${COGNITO_LOGOUT_URLS:-http://localhost:3000}"
+LOGOUT_URLS="${COGNITO_LOGOUT_URLS:-http://localhost:3000,http://localhost:3000/}"
 if [[ -n "${SITE_URL:-}" && "${LOGOUT_URLS}" != *"${SITE_URL}"* ]]; then
-  LOGOUT_URLS="${LOGOUT_URLS},${SITE_URL}"
+  LOGOUT_URLS="${LOGOUT_URLS},${SITE_URL},${SITE_URL}/"
 fi
 
 DOMAIN_PREFIX="${COGNITO_DOMAIN_PREFIX:-${PROJECT_NAME}-${ACCOUNT_ID}}"

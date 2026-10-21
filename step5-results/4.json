@@ -1,0 +1,12 @@
+{
+  "agenda": {
+    "title": null,
+    "starts_at": null,
+    "duration_minutes": null,
+    "items": [],
+    "action_items": [],
+    "language": "en"
+  },
+  "model": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "prompt_version": "agenda-v1"
+}

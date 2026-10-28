@@ -59,6 +59,11 @@ resource "aws_lambda_function" "parser" {
   timeout       = var.ai_timeout
   role          = aws_iam_role.parser.arn
 
+  tags = {
+    Project   = "spry"
+    ManagedBy = "terraform"
+  }
+
   image_config {
     command = ["app.ai.agenda_lambda.handler"]
   }
@@ -75,6 +80,11 @@ resource "aws_lambda_function" "parser" {
       COGNITO_CLIENT_ID    = aws_cognito_user_pool_client.web.id
       COGNITO_REGION       = var.region
     }
+  }
+
+  # Application deploy pipeline owns and updates the container image tag
+  lifecycle {
+    ignore_changes = [image_uri]
   }
 
   depends_on = [aws_cloudwatch_log_group.parser]

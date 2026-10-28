@@ -294,6 +294,11 @@ resource "aws_lambda_function" "report_builder" {
       REPORTS_BUCKET_NAME = aws_s3_bucket.reports.id
     }
   }
+
+  # Application pipeline and Secrets Manager own the runtime environment variables
+  lifecycle {
+    ignore_changes = [environment]
+  }
 }
 
 # Logical ID: ReportBuilderEventSourceMapping

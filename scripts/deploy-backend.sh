@@ -198,12 +198,18 @@ fi
 # keys itself; download them here and hand them over as a parameter. Without a
 # pool id (CI has no .env) the stack keeps the keys it already has.
 COGNITO_JWKS=""
+if [[ -z "${COGNITO_USER_POOL_ID:-}" ]] && command -v terraform >/dev/null 2>&1 && [[ -d "${ROOT}/infra" ]]; then
+  COGNITO_USER_POOL_ID="$(terraform -chdir="${ROOT}/infra" output -raw user_pool_id 2>/dev/null || true)"
+fi
+if [[ -z "${COGNITO_CLIENT_ID:-}" ]] && command -v terraform >/dev/null 2>&1 && [[ -d "${ROOT}/infra" ]]; then
+  COGNITO_CLIENT_ID="$(terraform -chdir="${ROOT}/infra" output -raw user_pool_client_id 2>/dev/null || true)"
+fi
 if [[ -n "${COGNITO_USER_POOL_ID:-}" ]]; then
   JWKS_URL="https://cognito-idp.${COGNITO_REGION:-${AWS_REGION}}.amazonaws.com/${COGNITO_USER_POOL_ID}/.well-known/jwks.json"
   log "fetching signing keys for ${COGNITO_USER_POOL_ID}"
   COGNITO_JWKS="$(curl -fsS --max-time 20 "${JWKS_URL}" \
     | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), separators=(",", ":")))')" \
-    || die "could not fetch ${JWKS_URL} - is COGNITO_USER_POOL_ID right? (make deploy-cognito)"
+    || die "could not fetch ${JWKS_URL} - is COGNITO_USER_POOL_ID right? (run make generate-env or make infra-plan)"
 else
   warn "COGNITO_USER_POOL_ID unset - keeping the stack's current Cognito settings"
 fi

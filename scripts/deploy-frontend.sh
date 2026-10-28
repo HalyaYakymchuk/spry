@@ -64,8 +64,14 @@ API_URL="${API_URL%/}"
 log "building against ${API_URL}"
 
 # The Cognito ids are compiled in too; without them nobody could sign in.
+if [[ -z "${COGNITO_CLIENT_ID:-}" || -z "${COGNITO_DOMAIN:-}" ]]; then
+  if command -v terraform >/dev/null 2>&1 && [[ -d "${ROOT}/infra" ]]; then
+    COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID:-$(terraform -chdir="${ROOT}/infra" output -raw user_pool_client_id 2>/dev/null || true)}"
+    COGNITO_DOMAIN="${COGNITO_DOMAIN:-$(terraform -chdir="${ROOT}/infra" output -raw cognito_domain 2>/dev/null || true)}"
+  fi
+fi
 [[ -n "${COGNITO_CLIENT_ID:-}" && -n "${COGNITO_DOMAIN:-}" ]] \
-  || die "COGNITO_CLIENT_ID / COGNITO_DOMAIN are not set in .env - run make deploy-cognito first"
+  || die "COGNITO_CLIENT_ID / COGNITO_DOMAIN are not set - run make generate-env or check terraform outputs"
 
 # The function URL is always HTTPS; plain HTTP here means a hand-edited .env.
 [[ "${API_URL}" == https://* ]] \
@@ -109,6 +115,11 @@ log "installing dependencies"
 (cd "${APP}" && "${PM[@]}" install --frozen-lockfile)
 
 log "building the static export"
+PARSER_URL="${PARSER_FUNCTION_URL:-${NEXT_PUBLIC_PARSER_URL:-}}"
+if [[ -z "${PARSER_URL}" ]] && command -v terraform >/dev/null 2>&1 && [[ -d "${ROOT}/infra" ]]; then
+  PARSER_URL="$(terraform -chdir="${ROOT}/infra" output -raw parser_function_url 2>/dev/null || true)"
+fi
+
 rm -rf "${APP}/out"
 (cd "${APP}" && NEXT_OUTPUT=export \
   NEXT_PUBLIC_API_URL="${API_URL}" \
@@ -116,6 +127,7 @@ rm -rf "${APP}/out"
   NEXT_PUBLIC_COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}" \
   NEXT_PUBLIC_COGNITO_DOMAIN="${COGNITO_DOMAIN}" \
   NEXT_PUBLIC_COGNITO_GOOGLE_ENABLED="${COGNITO_GOOGLE_ENABLED:-false}" \
+  NEXT_PUBLIC_PARSER_URL="${PARSER_URL}" \
   "${PM[@]}" build)
 [[ -f "${APP}/out/index.html" ]] || die "the export produced no out/index.html"
 
@@ -155,8 +167,8 @@ echo "  api        ${API_URL}"
 echo "  bucket     s3://${BUCKET}"
 echo
 
-echo "If this was the first frontend deploy, run make deploy-cognito again so"
-echo "Google sign-in may redirect back to ${SITE_URL}."
+echo "If this was the first frontend deploy, verify your Cognito callback URLs in"
+echo "Terraform so Google sign-in may redirect back to ${SITE_URL}."
 echo
 echo "Now allow the site's origin through CORS:"
 echo

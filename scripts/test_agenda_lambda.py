@@ -81,10 +81,23 @@ def get_cognito_id_token(
 
 
 def resolve_function_url(region: str = "eu-north-1", project_name: str = "peach") -> str:
-    """Resolve the Lambda Function URL from environment or CloudFormation stack."""
+    """Resolve the Lambda Function URL from environment, Terraform output, or CloudFormation stack."""
     url = os.getenv("PARSER_FUNCTION_URL") or os.getenv("NEXT_PUBLIC_PARSER_URL")
     if url:
         return url.strip()
+
+    try:
+        import subprocess
+        res = subprocess.run(
+            ["terraform", "-chdir=infra", "output", "-raw", "parser_function_url"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
 
     cf = boto3.client("cloudformation", region_name=region)
     stack_name = f"{project_name}-parser"

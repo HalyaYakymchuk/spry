@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: help up down build logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db deploy-cognito destroy-cognito deploy-backend destroy-backend logs-backend migrate-backend cert domain deploy-frontend destroy-frontend deploy-reports destroy-reports deploy-parser destroy-parser logs-parser test-agenda-lambda verify-step4 github-role report-now llm-hello parse
+.PHONY: help up down build build-frontend build-backend logs ps migrate revision test test-backend test-frontend lint fmt clean shell-backend shell-db infra-plan generate-env env deploy-infra deploy-auth deploy-cognito deploy-reports deploy-parser deploy-backend destroy-backend logs-backend migrate-backend cert domain deploy-frontend destroy-frontend logs-parser test-agenda-lambda verify-step4 github-role report-now llm-hello parse
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -16,6 +16,19 @@ clean: ## Stop the stack and wipe the database volume
 
 build: ## Rebuild images
 	$(COMPOSE) build
+
+build-frontend: ## Build frontend static export with configuration from Terraform outputs
+	@COGNITO_CLIENT_ID=$$(terraform -chdir=infra output -raw user_pool_client_id 2>/dev/null || echo "$${COGNITO_CLIENT_ID}") \
+	 COGNITO_DOMAIN=$$(terraform -chdir=infra output -raw cognito_domain 2>/dev/null || echo "$${COGNITO_DOMAIN}") \
+	 PARSER_FUNCTION_URL=$$(terraform -chdir=infra output -raw parser_function_url 2>/dev/null || echo "$${PARSER_FUNCTION_URL}") \
+	 cd frontend && NEXT_OUTPUT=export \
+	  NEXT_PUBLIC_COGNITO_CLIENT_ID="$$COGNITO_CLIENT_ID" \
+	  NEXT_PUBLIC_COGNITO_DOMAIN="$$COGNITO_DOMAIN" \
+	  NEXT_PUBLIC_PARSER_URL="$$PARSER_FUNCTION_URL" \
+	  pnpm build
+
+build-backend: ## Build backend docker image
+	$(COMPOSE) build backend
 
 logs: ## Tail all logs
 	$(COMPOSE) logs -f
@@ -51,14 +64,25 @@ shell-backend: ## Shell into the backend container
 shell-db: ## psql into the database
 	$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-spry}
 
-deploy-cognito: ## Create/update the Cognito user pool; writes COGNITO_* to .env and prints them
-	./scripts/deploy-cognito.sh
+infra-plan: ## Preview infrastructure changes locally (remote apply runs in HCP Terraform)
+	cd infra && terraform plan
 
-destroy-cognito: ## Delete the Cognito stack, every account in the pool included
-	./scripts/destroy-cognito.sh
+generate-env: ## Generate / sync .env with configuration values from Terraform outputs
+	@"$(PYTHON)" scripts/generate_env.py
+
+env: generate-env ## Alias for generate-env
+
+# Legacy CloudFormation targets redirected to unified Terraform infra-plan
+deploy-infra: infra-plan
+deploy-auth: infra-plan
+deploy-cognito: infra-plan
+deploy-reports: infra-plan
+deploy-parser: infra-plan
 
 deploy-backend: ## Build + push the image, roll the Lambda (function URL + Aurora), migrate, write BACKEND_URL to .env
-	./scripts/deploy-backend.sh
+	@COGNITO_USER_POOL_ID=$$(terraform -chdir=infra output -raw user_pool_id 2>/dev/null || echo "$${COGNITO_USER_POOL_ID}") \
+	 COGNITO_CLIENT_ID=$$(terraform -chdir=infra output -raw user_pool_client_id 2>/dev/null || echo "$${COGNITO_CLIENT_ID}") \
+	 ./scripts/deploy-backend.sh
 
 destroy-backend: ## Delete the backend stack, Aurora cluster included
 	./scripts/destroy-backend.sh
@@ -77,22 +101,13 @@ domain: ## Assign a custom domain to the frontend: make domain DOMAIN=app.exampl
 	./scripts/domain-frontend.sh domain
 
 deploy-frontend: ## Build the static export against BACKEND_URL and ship it to S3 + CloudFront
-	./scripts/deploy-frontend.sh
+	@COGNITO_CLIENT_ID=$$(terraform -chdir=infra output -raw user_pool_client_id 2>/dev/null || echo "$${COGNITO_CLIENT_ID}") \
+	 COGNITO_DOMAIN=$$(terraform -chdir=infra output -raw cognito_domain 2>/dev/null || echo "$${COGNITO_DOMAIN}") \
+	 PARSER_FUNCTION_URL=$$(terraform -chdir=infra output -raw parser_function_url 2>/dev/null || echo "$${PARSER_FUNCTION_URL}") \
+	 ./scripts/deploy-frontend.sh
 
 destroy-frontend: ## Delete the frontend stack (bucket + distribution)
 	./scripts/destroy-frontend.sh
-
-deploy-reports: ## Create/update reports stack: S3 bucket, endpoint, Lambda builder & weekly schedule
-	./scripts/deploy-reports.sh
-
-destroy-reports: ## Delete the reports stack (bucket + S3 Gateway VPC Endpoint)
-	./scripts/destroy-reports.sh
-
-deploy-parser: ## Deploy the agenda parser Lambda function and Function URL (Bedrock Claude eu-north-1)
-	./scripts/deploy-parser.sh
-
-destroy-parser: ## Delete the agenda parser stack
-	./scripts/destroy-parser.sh
 
 logs-parser: ## Tail the agenda parser Lambda CloudWatch logs
 	aws logs tail /aws/lambda/$${PROJECT_NAME:-peach}-agenda-parser --follow --since 10m
@@ -107,7 +122,7 @@ github-role: ## Create the IAM role GitHub Actions assumes to deploy (OIDC, no k
 	./scripts/github-role.sh
 
 report-now: ## Trigger on-demand weekly report generation: make report-now WEEK=2026-W39
-	@QUEUE_URL=$$(aws cloudformation describe-stacks --stack-name peach-reports --region eu-north-1 --query "Stacks[0].Outputs[?OutputKey=='ReportRequestsQueueUrl'].OutputValue" --output text); \
+	@QUEUE_URL=$$(cd infra && terraform output -raw report_requests_queue_url); \
 	aws sqs send-message \
 	  --queue-url "$$QUEUE_URL" \
 	  --region eu-north-1 \
@@ -125,4 +140,3 @@ TEXT ?= Meeting tomorrow at 10am to discuss Q4 budget. John leads for 30m. Actio
 
 parse: ## Parse meeting agenda text using Bedrock Claude: make parse TEXT="..."
 	@PARSER_MODEL="$(PARSER_MODEL)" AWS_REGION="$(AWS_REGION)" "$(PYTHON)" backend/scripts/run_parse.py --text "$(TEXT)"
-

@@ -53,6 +53,8 @@ production deployment manifests. Leave hooks for them, do not build them.
 
 - Docker + Docker Compose v2
 - PostgreSQL 17 (`postgres:17-alpine`)
+- Terraform (>= 1.10) & HCP Terraform for declarative infrastructure management, remote state, and CI/CD execution
+- AWS Provider (~> 6.0)
 
 ---
 
@@ -65,18 +67,28 @@ Peach/
 ├── .gitignore
 ├── docker-compose.yml            # base: db, backend, frontend
 ├── docker-compose.override.yml   # dev: bind mounts + hot reload (auto-loaded)
-├── Makefile                      # thin wrappers over the compose and deploy commands
+├── Makefile                      # thin wrappers over compose, terraform plan, and deploy commands
 │
 ├── .github/workflows/
 │   ├── lint.yml                  # ruff + eslint on every push
-│   └── deploy-backend.yml        # ships when a commit message says "deploy"
+│   ├── ci.yml                    # pytest and test suite execution
+│   └── deploy-backend.yml        # ships backend application when a commit message says "deploy"
 │
 ├── infra/
+│   ├── auth.tf                   # Terraform: Cognito User Pool, Client, and Hosted UI Domain
+│   ├── reports.tf                # Terraform: Reports S3 bucket, SQS queues, Lambdas, SES identity
+│   ├── ai.tf                     # Terraform: AI Agenda Parser Lambda + Function URL (Bedrock Claude)
+│   ├── outputs.tf                # Terraform: Root outputs exported for .env and application builds
+│   ├── variables.tf              # Terraform: Input variable declarations
+│   ├── versions.tf               # Terraform: Required version and AWS provider config
+│   ├── data.tf                   # Terraform: VPC, subnets, and account data sources
+│   ├── terraform.tfvars          # Terraform: Workspace variable definitions
 │   ├── backend.yaml              # CloudFormation: Lambda + function URL + Aurora Serverless v2
 │   ├── frontend.yaml             # CloudFormation: S3 + CloudFront (+ optional custom domain)
 │   └── github-oidc.yaml          # CloudFormation: the role Actions assumes
 │
 ├── scripts/
+│   ├── generate_env.py           # Syncs .env variables directly from terraform -chdir=infra output -raw
 │   ├── deploy-backend.sh         # build -> ECR -> CloudFormation -> migrate -> BACKEND_URL in .env
 │   ├── destroy-backend.sh        # delete the stack, database included
 │   ├── deploy-frontend.sh        # static export (against BACKEND_URL) -> S3 -> CloudFront
@@ -332,7 +344,14 @@ docker compose exec backend alembic revision --autogenerate -m "add x"
 docker compose exec backend pytest
 docker compose exec frontend pnpm test
 docker compose down -v                            # stop and wipe the database volume
+
+# Infrastructure & Environment commands
+make infra-plan                                   # preview infrastructure changes (terraform plan)
+make generate-env                                 # sync .env from Terraform outputs (or: make env)
 ```
+
+> [!IMPORTANT]
+> **Strict Remote Apply Rule**: There is strictly NO `terraform apply` anywhere in local workflows or the `Makefile`. Infrastructure applies are strictly automated remotely through HCP Terraform upon pull request merge into the `main` branch. Local developers use `make infra-plan` to preview changes and `make generate-env` to populate `.env`.
 
 Running outside Docker is supported for editor tooling: `cd backend && uv sync && uv run uvicorn app.main:app --reload`
 and `cd frontend && pnpm install && pnpm dev`, with `DATABASE_URL` pointed at `localhost` and only
@@ -375,29 +394,28 @@ The generated project was checked end to end:
 | Production stack | `docker compose -f docker-compose.yml up --build` | all three services healthy |
 | UI round trip | create → edit → delete an item in the browser | row confirmed in Postgres at each step |
 
-## 11. Deploying the backend to AWS
+## 11. Infrastructure & AWS Deployment
 
-Sign-in comes first: `make deploy-cognito` creates the user pool, app client and hosted domain
-(`infra/cognito.yaml`) and writes `COGNITO_REGION`, `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`,
-`COGNITO_DOMAIN` and `COGNITO_GOOGLE_ENABLED` to `.env`, printing them as well. Compose passes
-them to both services, `make deploy-backend` fetches the pool's signing keys and hands them to the
-Lambda (it has no internet route to fetch them), and `make deploy-frontend` compiles the ids in.
-Re-run it after the first `make deploy-frontend` so the site's URL is allowed as an OAuth
-redirect. For Google, create an OAuth client in Google Cloud with the redirect URI the deploy
-prints, set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `.env`, re-run `make deploy-cognito`,
-then rebuild the frontend so the button appears. `make destroy-cognito` deletes the pool and
-every account in it.
+### Transition from CloudFormation to Terraform
 
-Everything lives in **us-east-1**, and every resource carries a `PROJECT_NAME` tag.
+The core infrastructure previously spread across individual CloudFormation templates (`cognito.yaml`, `reports.yml`, `parser.yaml`) has been migrated to unified, declarative Terraform configurations in `infra/`:
+- **Authentication (`infra/auth.tf`)**: Amazon Cognito User Pool, Hosted UI Domain, App Client (OAuth / Hosted UI flows), and Google IdP integration.
+- **Reporting Pipeline (`infra/reports.tf`)**: Reports S3 bucket, SQS request queue and DLQ, Report Builder Lambda, Report Mailer Lambda, EventBridge scheduler, and SES domain identity.
+- **AI Agenda Parser (`infra/ai.tf`)**: Stateless Python 3.12 Lambda running outside VPC, Bedrock Anthropic Claude model access (`eu.anthropic.claude-haiku-4-5-20251001-v1:0`), public HTTPS Function URL, and Cognito JWT authentication.
+
+All outputs are declared centrally in `infra/outputs.tf`, allowing application builds, `.env` synchronizations, and deployment scripts to read them cleanly using `terraform -chdir=infra output -raw <output_name>` (or `make generate-env`).
 
 ```bash
-make deploy-backend      # build -> ECR -> CloudFormation -> Lambda -> migrate -> BACKEND_URL in .env
-make migrate-backend     # re-run migrations alone
-make logs-backend        # tail CloudWatch
-make destroy-backend     # delete everything, database included
+make infra-plan          # preview infrastructure changes locally (runs: cd infra && terraform plan)
+make generate-env        # extract Terraform outputs directly into .env (or: make env)
+make deploy-backend      # build image -> ECR -> Lambda -> migrate -> write BACKEND_URL to .env
+make deploy-frontend     # build static export against BACKEND_URL & Terraform outputs -> S3 -> CloudFront
+make report-now          # trigger on-demand weekly report via SQS (queue URL from Terraform)
+make logs-backend        # tail CloudWatch logs for backend Lambda
+make logs-parser         # tail CloudWatch logs for agenda parser Lambda
 ```
 
-`infra/backend.yaml` and `infra/parser.yaml` define the core architecture across AWS:
+`infra/backend.yaml` and `infra/ai.tf` define the core architecture across AWS:
 
 ```mermaid
 flowchart TB
@@ -555,47 +573,86 @@ traffic ever outgrow the free tier. The S3 bucket holding the site costs a few c
 hard $0 cap rather than a free tier, CloudFront's flat-rate *Free* plan can be selected on the
 distribution in the console; there is no API for it yet.
 
-## 13. Deploying from GitHub Actions
+## 13. Deployment Pipelines: HCP Terraform and GitHub Actions
+
+The system operates with two decoupled, specialized deployment pipelines:
+1. **HCP Terraform Pipeline** — handles infrastructure provisioning, state locking, and updates.
+2. **GitHub Actions Pipeline** — handles application code testing, container image builds, migrations, and artifact deployments.
+
+```mermaid
+flowchart TD
+    subgraph DevWorkflow ["Developer Workflow"]
+        Dev["Developer"]
+        MakePlan["make infra-plan\n(local preview)"]
+        MakeEnv["make generate-env\n(syncs .env from tf outputs)"]
+        PR["Pull Request (GitHub)"]
+        MergeMain["Merge to main"]
+    end
+
+    subgraph Pipeline1 ["Pipeline 1: HCP Terraform (Infrastructure)"]
+        HCP_Plan["Speculative Plan\n(PR checks)"]
+        HCP_Apply["Remote terraform apply\n(State locking & remote AWS execution)"]
+        AWS_Infra[("AWS Resources\nCognito, Reports, AI Parser, SQS, S3")]
+    end
+
+    subgraph Pipeline2 ["Pipeline 2: GitHub Actions (Application Code)"]
+        GHA_CI["Lint & Pytest Suites"]
+        GHA_Deploy["deploy-backend.yml\n(ECR buildx, Lambda update, Alembic migration)"]
+        Frontend_Deploy["deploy-frontend.sh\n(Static export to S3 + CloudFront invalidation)"]
+    end
+
+    Dev -->|"Runs locally"| MakePlan
+    Dev -->|"Syncs config"| MakeEnv
+    Dev -->|"Opens"| PR
+    PR -->|"Triggers"| HCP_Plan
+    PR -->|"Triggers"| GHA_CI
+    PR -->|"Approved & merged"| MergeMain
+    MergeMain -->|"Automatic trigger"| HCP_Apply
+    HCP_Apply -->|"Provisions & updates"| AWS_Infra
+    MergeMain -->|"Deploy commit keyword / dispatch"| GHA_Deploy
+    GHA_Deploy -->|"Deploys backend code"| AWS_Infra
+    Dev -->|"make deploy-frontend"| Frontend_Deploy
+    Frontend_Deploy -->|"Reads outputs & uploads"| AWS_Infra
+```
+
+---
+
+### Pipeline 1: Infrastructure Pipeline (HCP Terraform)
+
+- **Scope:** All Terraform configurations inside `infra/` (`auth.tf`, `reports.tf`, `ai.tf`, `outputs.tf`, `variables.tf`, etc.).
+- **Speculative Plans on Pull Requests:** Whenever changes to `infra/` are pushed to a branch or pull request, HCP Terraform runs a speculative `terraform plan` and posts the plan status and resource diff back to GitHub.
+- **Automated Remote Apply on Merge:** When a pull request is merged into `main`, HCP Terraform automatically triggers a remote `terraform apply` in the cloud workspace.
+- **Remote State & Centralized Secrets:** HCP Terraform manages the state file securely with state locking and auditing. AWS credentials reside in HCP Terraform workspace variables, eliminating the need to store static AWS credentials on developer workstations or CI runners.
+- **Developer Local Workflow:**
+  - Run `make infra-plan` (`cd infra && terraform plan`) to preview infrastructure changes locally before committing.
+  - Run `make generate-env` (or `make env`) to synchronize non-sensitive infrastructure outputs (Cognito Client ID, User Pool ID, SQS Queue URLs, Parser Function URL) directly into `.env`.
+  - **CRITICAL SAFETY RULE:** There is strictly **NO `terraform apply`** locally or in the `Makefile`. All applies happen automatically and remotely inside HCP Terraform upon merging to `main`.
+
+---
+
+### Pipeline 2: Application Deployment Pipeline (GitHub Actions)
+
+- **Scope:** FastAPI backend application code, database migrations (Alembic), Next.js frontend, and unit/integration test suites.
+- **Continuous Integration:** `.github/workflows/lint.yml` and `.github/workflows/ci.yml` run `ruff`, `eslint`, and `pytest` on every push and PR.
+- **Backend Deployment Workflow:**
+  When a commit message on `main` contains the word **deploy** (e.g. `git commit -m "tighten items query, deploy"`), or when manually invoked via `workflow_dispatch`, `.github/workflows/deploy-backend.yml` runs:
+  1. **OIDC Authentication (Keyless):** Assumes an AWS IAM role created via `make github-role` using GitHub's OIDC provider. No long-lived AWS keys are stored in GitHub Secrets.
+  2. **Container Build & Push:** Sets up QEMU and Docker Buildx to cross-compile the backend `lambda` stage for `linux/arm64` and pushes the container image to Amazon ECR.
+  3. **Lambda Roll & Migrations:** Updates the backend Lambda with the newly pushed image URI and invokes the Lambda with payload `{"action": "migrate"}` to run Alembic database migrations against Aurora Serverless v2.
+- **Frontend Build & Deployment:**
+  The frontend static export is built against backend endpoints and Cognito configuration retrieved directly from Terraform outputs:
+  ```bash
+  make deploy-frontend
+  ```
+  Commands resolve `user_pool_client_id`, `cognito_domain`, and `parser_function_url` using `terraform -chdir=infra output -raw ...`, bundle the static assets, sync them to S3, and invalidate the CloudFront edge distribution.
 
 ```bash
-make github-role      # once: create the role Actions assumes
+make github-role      # once: create the OIDC IAM role Actions assumes
 ```
 
-Then write the word **deploy** in a commit message on `main`:
+**OIDC Trust Boundary:** The role trust policy allows assumption only from `repo:<owner>/<repo>:ref:refs/heads/main`, ensuring that untrusted branches or fork PRs cannot deploy application code.
 
-```bash
-git commit -m "tighten the items query, deploy"
-git push
-```
-
-`.github/workflows/deploy-backend.yml` picks that up and runs `make deploy-backend` on a runner.
-Ordinary commits to `main` do nothing, so the expensive path stays opt-in. The workflow also has a
-`workflow_dispatch` trigger, so it can be run by hand from the Actions tab without any magic word.
-Matching is case-insensitive — GitHub compares strings that way — so `Deploy` and `redeployed`
-count too.
-
-**No access key is involved.** `make github-role` creates a stack holding an IAM role and, if the
-account does not already have one, the GitHub OIDC provider. The workflow asks GitHub for a
-short-lived token describing the run, and AWS trades it for temporary credentials. The trust policy
-accepts that token only for this repository and only for the subject below:
-
-```
-repo:<owner>/<repo>:ref:refs/heads/main
-```
-
-That restriction matters. Widening it to `repo:<owner>/<repo>:*` — via `GITHUB_SUBJECT_CLAIM` in
-`.env` — would let any branch, and any pull request from anyone who can open one, assume a role
-that can deploy. The default keeps it to `main`.
-
-The role's policy is deliberately not `AdministratorAccess`. It is scoped to the services the
-deploy actually drives, and to this project's resource names wherever the API supports it —
-a few, such as `ec2:CreateSecurityGroup`, accept no resource-level permissions at all. If a CI deploy ever stops with `AccessDenied`, the missing
-action belongs in `infra/github-oidc.yaml`.
-
-**Two repository variables** carry the rest: `AWS_DEPLOY_ROLE_ARN` and `AWS_REGION`. If the `gh`
-CLI is installed and logged in, `make github-role` sets both for you; otherwise it prints them to
-paste into *Settings → Secrets and variables → Actions*. Neither is secret — the ARN is useless
-without a token minted by this repository's workflows.
+**Two Repository Variables** carry the CI configuration: `AWS_DEPLOY_ROLE_ARN` and `AWS_REGION`. If the `gh` CLI is installed and logged in, `make github-role` configures both automatically.
 
 **CI has no `.env`, and that is fine.** Any parameter the deploy script resolves to an empty value
 is left out of the CloudFormation call, and CloudFormation then keeps whatever the stack already

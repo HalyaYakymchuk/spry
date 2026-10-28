@@ -29,3 +29,14 @@ out/
 # --- docker ---
 pgdata/
 response.json
+
+# Terraform ignores
+.terraform/
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+infra/*.zip
+*.tfvars
+infra/*.tfvars

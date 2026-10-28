@@ -1,0 +1,8 @@
+project_name         = "peach"
+auth_project_name    = "spry"
+region               = "eu-north-1"
+stage                = "dev"
+google_client_id = "YOUR_GOOGLE_CLIENT_ID"
+google_client_secret = "YOUR_GOOGLE_CLIENT_SECRET"
+database_url         = "postgresql+asyncpg://postgres:Qot9J3Dft0wrB4F1vvoV16HPU2xwljaOk3yU~kmn@peach-db.c3a8uecgkswc.eu-north-1.rds.amazonaws.com:5432/spry"
+ai_image_uri         = "640012953957.dkr.ecr.eu-north-1.amazonaws.com/peach-backend:parser-step4-cors"

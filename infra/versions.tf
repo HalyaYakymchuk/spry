@@ -27,7 +27,7 @@ provider "aws" {
     tags = {
       PROJECT_NAME = var.project_name
       ManagedBy    = "terraform"
-      TestCheck    = "ok"
+      LabStep      = "step4"
     }
   }
 }

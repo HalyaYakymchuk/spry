@@ -1,0 +1,373 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Streaming pipeline in the cloud: Kinesis Data Stream -> Firehose -> S3 ->
+  Glue Crawler / Catalog -> Athena, plus Lambda failure-rate check -> SNS alert.
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: spry-dev-tf-playground-48c624b8
+    Description: Existing S3 bucket name for Firehose destination and Glue crawler target.
+
+  AlertEmail:
+    Type: String
+    Description: Email address subscribed to SNS payments failure alerts.
+
+  Threshold:
+    Type: Number
+    Default: 0.10
+    Description: Failure share threshold above which an alert is sent (e.g. 0.10 for 10%).
+
+  MinCount:
+    Type: Number
+    Default: 10
+    Description: Minimum final status events per payment method required to trigger an alert.
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Kinesis Data Stream
+  # ---------------------------------------------------------------------------
+  PaymentsStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: payments-stream
+      StreamModeDetails:
+        StreamMode: ON_DEMAND
+
+  # ---------------------------------------------------------------------------
+  # Firehose Delivery Stream to S3
+  # ---------------------------------------------------------------------------
+  FirehoseDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: KinesisSourceAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:DescribeStreamSummary
+                  - kinesis:GetRecords
+                  - kinesis:GetShardIterator
+                  - kinesis:ListShards
+                Resource: !GetAtt PaymentsStream.Arn
+        - PolicyName: S3DestinationAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${BucketName}
+                  - !Sub arn:aws:s3:::${BucketName}/*
+
+  PaymentsDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: payments-to-s3
+      DeliveryStreamType: KinesisStreamAsSource
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt PaymentsStream.Arn
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !Sub arn:aws:s3:::${BucketName}
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+        Prefix: "payments-stream/dt=!{timestamp:yyyy-MM-dd}/"
+        ErrorOutputPrefix: "payments-stream-errors/"
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 1
+        CompressionFormat: UNCOMPRESSED
+
+  # ---------------------------------------------------------------------------
+  # SNS Alerts
+  # ---------------------------------------------------------------------------
+  PaymentsFailureAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: payments-failure-alerts
+      Subscription:
+        - Endpoint: !Ref AlertEmail
+          Protocol: email
+
+  # ---------------------------------------------------------------------------
+  # Lambda Failure-Rate Check
+  # ---------------------------------------------------------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/payments-failure-check
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/payments-failure-check:*
+        - PolicyName: KinesisStreamRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:DescribeStreamSummary
+                  - kinesis:GetRecords
+                  - kinesis:GetShardIterator
+                  - kinesis:ListShards
+                  - kinesis:SubscribeToShard
+                Resource: !GetAtt PaymentsStream.Arn
+        - PolicyName: SNSPublish
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref PaymentsFailureAlertsTopic
+
+  PaymentsFailureCheckFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: payments-failure-check
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref PaymentsFailureAlertsTopic
+          THRESHOLD: !Ref Threshold
+          MIN_COUNT: !Ref MinCount
+      Code:
+        ZipFile: |
+          import base64
+          import json
+          import logging
+          import os
+          import boto3
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          sns_client = boto3.client("sns")
+          SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
+          THRESHOLD = float(os.environ.get("THRESHOLD", "0.10"))
+          MIN_COUNT = int(os.environ.get("MIN_COUNT", "10"))
+
+          def lambda_handler(event, context):
+              method_stats = {}
+
+              for record in event.get("Records", []):
+                  kinesis_data = record.get("kinesis", {}).get("data", "")
+                  if not kinesis_data:
+                      continue
+                  try:
+                      payload = base64.b64decode(kinesis_data).decode("utf-8")
+                  except Exception as e:
+                      logger.error(f"Error decoding record data: {e}")
+                      continue
+
+                  for line in payload.splitlines():
+                      line = line.strip()
+                      if not line:
+                          continue
+                      try:
+                          ev = json.loads(line)
+                      except Exception as e:
+                          logger.error(f"Error parsing json: {e}")
+                          continue
+
+                      status = ev.get("status")
+                      method = ev.get("paymentMethod", "UNKNOWN")
+
+                      if status in ("success", "failure"):
+                          if method not in method_stats:
+                              method_stats[method] = {"success": 0, "failure": 0}
+                          method_stats[method][status] += 1
+
+              alerts = []
+              for method, counts in method_stats.items():
+                  successes = counts["success"]
+                  failures = counts["failure"]
+                  total_final = successes + failures
+                  share = (failures / total_final) if total_final > 0 else 0.0
+
+                  logger.info(
+                      f"trigger=kinesis method={method} total={total_final} "
+                      f"successes={successes} failures={failures} "
+                      f"share={share:.4f} threshold={THRESHOLD} min_count={MIN_COUNT}"
+                  )
+
+                  if total_final >= MIN_COUNT and share > THRESHOLD:
+                      subject = f"Payment Failure Alert: {method} ({share:.1%})"
+                      message = (
+                          f"Payment failure alert triggered for method '{method}'.\n\n"
+                          f"Method: {method}\n"
+                          f"Failure Share: {share:.2%} ({failures}/{total_final})\n"
+                          f"Configured Threshold: {THRESHOLD:.2%}\n"
+                          f"Configured Min Count: {MIN_COUNT}\n"
+                          f"Total Final Events in Batch: {total_final}\n"
+                      )
+                      logger.warning(f"Publishing alert for {method}: share={share:.4f} > {THRESHOLD}")
+                      try:
+                          sns_client.publish(
+                              TopicArn=SNS_TOPIC_ARN,
+                              Subject=subject[:100],
+                              Message=message
+                          )
+                          alerts.append(method)
+                      except Exception as e:
+                          logger.error(f"Failed to publish SNS alert for {method}: {e}")
+
+              return {
+                  "statusCode": 200,
+                  "processedMethods": len(method_stats),
+                  "alertsTriggered": alerts
+              }
+
+  PaymentsStreamEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt PaymentsStream.Arn
+      FunctionName: !GetAtt PaymentsFailureCheckFunction.Arn
+      StartingPosition: LATEST
+      BatchSize: 100
+      MaximumBatchingWindowInSeconds: 30
+
+  # ---------------------------------------------------------------------------
+  # Glue Catalog Database & Crawler
+  # ---------------------------------------------------------------------------
+  PaymentsStreamDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: payments_stream_db
+        Description: Glue database for payments streaming events
+
+  GlueCrawlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReadAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${BucketName}
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub arn:aws:s3:::${BucketName}/payments-stream/*
+        - PolicyName: GlueCatalogAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - glue:BatchCreatePartition
+                  - glue:BatchGetPartition
+                  - glue:CreatePartition
+                  - glue:CreateTable
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:UpdateDatabase
+                  - glue:UpdatePartition
+                  - glue:UpdateTable
+                Resource:
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/payments_stream_db
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/payments_stream_db/*
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws-glue/crawlers
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws-glue/crawlers:*
+
+  PaymentsStreamCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: payments-stream-crawler
+      DatabaseName: !Ref PaymentsStreamDatabase
+      Role: !GetAtt GlueCrawlerRole.Arn
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${BucketName}/payments-stream/
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: LOG
+      RecrawlPolicy:
+        RecrawlBehavior: CRAWL_EVERYTHING
+
+Outputs:
+  KinesisStreamName:
+    Description: Name of the Kinesis Data Stream
+    Value: !Ref PaymentsStream
+  KinesisStreamArn:
+    Description: ARN of the Kinesis Data Stream
+    Value: !GetAtt PaymentsStream.Arn
+  DeliveryStreamName:
+    Description: Name of the Firehose Delivery Stream
+    Value: !Ref PaymentsDeliveryStream
+  LambdaFunctionName:
+    Description: Name of the failure-check Lambda function
+    Value: !Ref PaymentsFailureCheckFunction
+  SNSTopicArn:
+    Description: ARN of the payments failure alerts SNS topic
+    Value: !Ref PaymentsFailureAlertsTopic
+  GlueDatabaseName:
+    Description: Name of the Glue database
+    Value: !Ref PaymentsStreamDatabase
+  GlueCrawlerName:
+    Description: Name of the Glue crawler
+    Value: !Ref PaymentsStreamCrawler
